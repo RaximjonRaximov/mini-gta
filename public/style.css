@@ -1,0 +1,49 @@
+body {
+  margin: 0;
+  padding: 0;
+  background: #0b0f19;
+  color: #fff;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  overflow: hidden;
+}
+
+#game {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #1f2937;
+}
+
+#hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  font-size: 15px;
+}
+
+#hud > div {
+  background: rgba(15, 23, 42, 0.75);
+  padding: 6px 10px;
+  border-radius: 8px;
+  margin: 0 4px;
+}
+
+#wanted { color: #f87171; font-weight: 700; }
+#mission { color: #fbbf24; }
+#help { color: #94a3b8; font-size: 13px; }
+
+@media (max-width: 800px) {
+  #help { display: none; }
+}
