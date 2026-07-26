@@ -1,5 +1,5 @@
 import { App, DISABLED, type HttpResponse, type HttpRequest } from 'uWebSockets.js';
-import { decodeInput, Op, type CreateRoomRequest, type JoinRoomRequest, type RoomInfo } from '@mini-gta/shared';
+import { decodeInput, encodeSeed, Op, type CreateRoomRequest, type JoinRoomRequest, type RoomInfo } from '@mini-gta/shared';
 import { Room } from './Room.js';
 import type { UserData } from './types.js';
 
@@ -96,6 +96,9 @@ app.get('/metrics', (res) => {
     rooms: rooms.size,
     players,
     lastTickMs,
+    tickP99: tickP99(),
+    updateMs: lastUpdateMs,
+    snapshotMs: lastSnapshotMs,
     cpuUser: usage.user,
     cpuSystem: usage.system,
   });
@@ -123,12 +126,13 @@ app.ws<UserData>('/ws', {
     const p = room.addPlayer(data.name, ws);
     if (!p) { ws.close(); return; }
     data.playerId = p.id;
-    // tell client its own id
+    // tell client its own id and the world seed
     const assign = new ArrayBuffer(3);
     const v = new DataView(assign);
     v.setUint8(0, Op.AssignId);
     v.setUint16(1, p.id, true);
     ws.send(assign, true);
+    ws.send(encodeSeed(room.seed), true);
     ws.subscribe(`room:${room.id}`);
   },
   message: (ws, message) => {
@@ -168,16 +172,37 @@ app.ws<UserData>('/ws', {
 });
 
 let lastTickMs = 0;
+let lastUpdateMs = 0;
+let lastSnapshotMs = 0;
+const TICK_HISTORY = 300;
+const tickHistory: number[] = [];
 
 // Simulation loop
 function tickAll(): void {
   const t0 = process.hrtime.bigint();
+  let updateNs = BigInt(0);
+  let snapshotNs = BigInt(0);
   for (const room of rooms.values()) {
+    const u0 = process.hrtime.bigint();
     room.update(1 / 20);
+    const u1 = process.hrtime.bigint();
     room.broadcastSnapshot();
+    const u2 = process.hrtime.bigint();
+    updateNs += u1 - u0;
+    snapshotNs += u2 - u1;
   }
   const t1 = process.hrtime.bigint();
   lastTickMs = Number(t1 - t0) / 1_000_000;
+  lastUpdateMs = Number(updateNs) / 1_000_000;
+  lastSnapshotMs = Number(snapshotNs) / 1_000_000;
+  tickHistory.push(lastTickMs);
+  if (tickHistory.length > TICK_HISTORY) tickHistory.shift();
+}
+
+function tickP99(): number {
+  if (tickHistory.length === 0) return 0;
+  const sorted = tickHistory.slice().sort((a, b) => a - b);
+  return sorted[Math.floor((sorted.length - 1) * 0.99)] ?? 0;
 }
 
 app.listen(HOST, PORT, (listenSocket) => {

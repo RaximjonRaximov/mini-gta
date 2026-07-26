@@ -1,4 +1,4 @@
-import { decodeSnapshot, decodeInput, encodeInput, InputKey, Op, WORLD_SIZE, playerColor, type EntityDelta, type Snapshot, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest } from '@mini-gta/shared';
+import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, generateCity, InputKey, Op, WORLD_SIZE, playerColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -74,6 +74,7 @@ let receivedAck = 0;
 let lastSnapshotTime = performance.now();
 let lastRender = performance.now();
 let fps = 0;
+let city: City | null = null;
 
 function buildInputPacket(): ArrayBuffer {
   let k = 0;
@@ -201,6 +202,12 @@ function connect(wsUrl: string, name: string, roomId: string): void {
       } else if (op === Op.AssignId) {
         localPlayerId = v.getUint16(1, true);
         entities.delete(localPlayerId);
+      } else if (op === Op.Event) {
+        const sub = v.getUint8(1);
+        if (sub === 0x01) {
+          const seed = decodeSeed(ev.data);
+          city = generateCity(seed);
+        }
       }
     }
   };
@@ -260,20 +267,34 @@ async function loadRooms() {
 }
 
 // --- rendering ---
-function drawEmptyWorld(camX: number, camY: number): void {
-  ctx.fillStyle = '#111827';
+function onScreen(r: Rect, camX: number, camY: number): boolean {
+  return r.x < camX + canvas.width && r.x + r.w > camX && r.y < camY + canvas.height && r.y + r.h > camY;
+}
+
+function drawWorld(camX: number, camY: number): void {
+  ctx.fillStyle = '#0b0f19';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  // grid
-  ctx.strokeStyle = '#1f2937';
-  ctx.lineWidth = 2;
-  const grid = 512;
-  const startX = Math.floor(camX / grid) * grid - camX;
-  const startY = Math.floor(camY / grid) * grid - camY;
-  for (let x = startX; x < canvas.width; x += grid) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-  }
-  for (let y = startY; y < canvas.height; y += grid) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  if (city) {
+    ctx.fillStyle = '#1f2937';
+    for (const r of city.roads) {
+      if (onScreen(r, camX, camY)) ctx.fillRect(r.x - camX, r.y - camY, r.w, r.h);
+    }
+    ctx.fillStyle = '#374151';
+    for (const b of city.buildings) {
+      if (onScreen(b, camX, camY)) ctx.fillRect(b.x - camX, b.y - camY, b.w, b.h);
+    }
+  } else {
+    ctx.strokeStyle = '#1f2937';
+    ctx.lineWidth = 2;
+    const grid = 512;
+    const startX = Math.floor(camX / grid) * grid - camX;
+    const startY = Math.floor(camY / grid) * grid - camY;
+    for (let x = startX; x < canvas.width; x += grid) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = startY; y < canvas.height; y += grid) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
   }
   // bounds
   ctx.strokeStyle = '#ef4444';
@@ -297,9 +318,12 @@ function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
 function drawLocalPlayer(): void {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
+  // white outline so the local player is always visible on any background
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy, 15, 0, Math.PI * 2); ctx.stroke();
   ctx.fillStyle = '#4ade80';
   ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(localState.angle) * 24, cy + Math.sin(localState.angle) * 24); ctx.stroke();
 }
 
@@ -334,7 +358,7 @@ function loop(): void {
 
   const camX = localState.x - canvas.width / 2;
   const camY = localState.y - canvas.height / 2;
-  drawEmptyWorld(camX, camY);
+  drawWorld(camX, camY);
   for (const e of entities.values()) drawEntity(e, now);
   drawLocalPlayer();
 

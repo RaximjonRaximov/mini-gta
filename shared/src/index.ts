@@ -142,10 +142,20 @@ export function decodeInput(buf: ArrayBuffer): { seq: number; keys: number; acti
   return { seq, keys, actions, angle };
 }
 
+function entitySize(changed: number): number {
+  let n = 4; // id + changed + color + (id takes 2, changed 1, color 1)
+  if (changed & ChangedField.X) n += 2;
+  if (changed & ChangedField.Y) n += 2;
+  if (changed & ChangedField.Angle) n += 1;
+  if (changed & ChangedField.Hp) n += 1;
+  if (changed & ChangedField.Vel) n += 4;
+  return n;
+}
+
 export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
-  // estimate size: header 9 + per entity up to 18 bytes (color always included)
-  const maxSize = 9 + snap.entities.length * 18;
-  const buf = new ArrayBuffer(maxSize);
+  let size = 9;
+  for (const e of snap.entities) size += entitySize(e.changed);
+  const buf = new ArrayBuffer(size);
   const v = new DataView(buf);
   let off = 0;
   v.setUint8(off++, Op.Snapshot);
@@ -166,7 +176,7 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
       v.setInt16(off, Math.max(-32767, Math.min(32767, Math.round(e.vy! * 64))), true); off += 2;
     }
   }
-  return buf.slice(0, off);
+  return buf;
 }
 
 export function decodeSnapshot(buf: ArrayBuffer): Snapshot {
@@ -201,4 +211,95 @@ export function quantizeAngle255(angle: number): number {
 
 export function angleFrom255(b: number): number {
   return (b / 255) * Math.PI * 2;
+}
+
+// --- Seeded random number generator ---
+export type Rng = () => number;
+
+export function createRng(seed: string): Rng {
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+    h = Math.imul(h ^ (h >>> 16), 2246822507) ^ Math.imul(h, 3266489909);
+  }
+  let s = h >>> 0;
+  return () => {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// --- Seed packet helpers ---
+export function encodeSeed(seed: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(seed);
+  const buf = new ArrayBuffer(2 + bytes.length);
+  const v = new DataView(buf);
+  v.setUint8(0, Op.Event);
+  v.setUint8(1, 0x01); // seed sub-op
+  new Uint8Array(buf, 2).set(bytes);
+  return buf;
+}
+
+export function decodeSeed(buf: ArrayBuffer): string {
+  return new TextDecoder().decode(new Uint8Array(buf, 2));
+}
+
+// --- City generation ---
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface City {
+  worldSize: number;
+  roadWidth: number;
+  roadSpacing: number;
+  roads: Rect[];
+  buildings: Rect[];
+}
+
+export function generateCity(seed: string, worldSize = WORLD_SIZE): City {
+  const rng = createRng(seed);
+  const roadSpacing = 512;
+  const roadWidth = 96;
+  const halfRoad = roadWidth / 2;
+  const roads: Rect[] = [];
+  const buildings: Rect[] = [];
+
+  for (let x = 0; x <= worldSize; x += roadSpacing) {
+    roads.push({ x: x - halfRoad, y: 0, w: roadWidth, h: worldSize });
+  }
+  for (let y = 0; y <= worldSize; y += roadSpacing) {
+    roads.push({ x: 0, y: y - halfRoad, w: worldSize, h: roadWidth });
+  }
+
+  const blockSize = roadSpacing - roadWidth;
+  const cols = Math.floor(worldSize / roadSpacing);
+  for (let bx = 0; bx < cols; bx++) {
+    for (let by = 0; by < cols; by++) {
+      const cx = bx * roadSpacing + halfRoad;
+      const cy = by * roadSpacing + halfRoad;
+      const count = Math.floor(rng() * 3); // 0-2 buildings per block
+      for (let i = 0; i < count; i++) {
+        const bw = 32 + rng() * (blockSize * 0.4 - 32);
+        const bh = 32 + rng() * (blockSize * 0.4 - 32);
+        const margin = 24;
+        const x = cx + margin + rng() * (blockSize - bw - margin * 2);
+        const y = cy + margin + rng() * (blockSize - bh - margin * 2);
+        buildings.push({ x, y, w: bw, h: bh });
+      }
+    }
+  }
+
+  return { worldSize, roadWidth, roadSpacing, roads, buildings };
+}
+
+export function rectsIntersect(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }

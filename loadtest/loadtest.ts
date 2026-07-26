@@ -94,9 +94,9 @@ async function main(): Promise<void> {
   const metricInterval = setInterval(async () => {
     try {
       const res = await fetch(`${HTTP}/metrics`);
-      const m = (await res.json()) as { lastTickMs: number; players: number };
-      metrics.push(m.lastTickMs);
-      console.log(`tick=${m.lastTickMs.toFixed(2)}ms players=${m.players}`);
+      const m = (await res.json()) as { lastTickMs: number; tickP99: number; updateMs: number; snapshotMs: number; players: number };
+      metrics.push(m.tickP99 ?? m.lastTickMs);
+      console.log(`tick=${m.lastTickMs.toFixed(2)}ms update=${m.updateMs.toFixed(2)}ms snapshot=${m.snapshotMs.toFixed(2)}ms p99=${(m.tickP99 ?? 0).toFixed(2)}ms players=${m.players}`);
     } catch { /* ignore */ }
   }, 1000);
 

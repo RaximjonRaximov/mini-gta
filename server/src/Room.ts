@@ -1,4 +1,5 @@
 import { Player, sanitizeName, type UwsSocket } from './types.js';
+import { World } from './World.js';
 import { encodeSnapshot, ChangedField, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, type Snapshot, type EntityDelta } from '@mini-gta/shared';
 
 export interface RoomData {
@@ -34,6 +35,8 @@ export class Room {
 
   // previous states for delta snapshots
   prevStates = new Map<number, { x: number; y: number; angle: number; hp: number; vx: number; vy: number }>();
+  private deltaPool: EntityDelta[] = [];
+  world: World;
 
   constructor(id: string, joinCode: string, mapName: string, seed: string, maxPlayers: number, password?: string) {
     this.id = id;
@@ -42,6 +45,7 @@ export class Room {
     this.seed = seed;
     this.maxPlayers = maxPlayers;
     this.passwordHash = password || null;
+    this.world = new World(seed);
   }
 
   publicInfo(): RoomData {
@@ -63,8 +67,12 @@ export class Room {
     const id = this.nextPlayerId++;
     const safe = sanitizeName(name) || `Player${id}`;
     const finalName = this.uniqueName(safe);
-    const x = 100 + Math.random() * (WORLD_SIZE - 200);
-    const y = 100 + Math.random() * (WORLD_SIZE - 200);
+    let x = 100 + Math.random() * (WORLD_SIZE - 200);
+    let y = 100 + Math.random() * (WORLD_SIZE - 200);
+    for (let i = 0; i < 20 && this.world.collides(x, y, 10); i++) {
+      x = 100 + Math.random() * (WORLD_SIZE - 200);
+      y = 100 + Math.random() * (WORLD_SIZE - 200);
+    }
     const p = new Player(id, finalName, pickColor(id), this.id, x, y);
     p.ws = ws;
     this.players.set(id, p);
@@ -107,7 +115,10 @@ export class Room {
     this.tickAcc -= 1 / TICK_RATE;
     this.tick++;
     for (const p of this.players.values()) {
+      const oldX = p.x;
+      const oldY = p.y;
       p.applyInput(1 / TICK_RATE);
+      this.world.resolve(p, oldX, oldY);
     }
   }
 
@@ -123,19 +134,24 @@ export class Room {
 
   computeDeltas(): EntityDelta[] {
     const entities: EntityDelta[] = [];
+    let i = 0;
     for (const p of this.players.values()) {
+      let e = this.deltaPool[i];
+      if (!e) { e = { id: p.id, changed: 0 }; this.deltaPool[i] = e; }
+      i++;
       const prev = this.prevStates.get(p.id)!;
       const changed = p.getChanged(prev);
-      const e: EntityDelta = { id: p.id, changed };
-      if (changed & ChangedField.X) e.x = p.x;
-      if (changed & ChangedField.Y) e.y = p.y;
-      if (changed & ChangedField.Angle) e.angle = p.angle;
-      if (changed & ChangedField.Hp) e.hp = p.hp;
-      if (changed & ChangedField.Vel) { e.vx = p.vx; e.vy = p.vy; }
+      e.id = p.id;
+      e.changed = changed;
       e.color = p.color;
+      if (changed & ChangedField.X) e.x = p.x; else e.x = undefined;
+      if (changed & ChangedField.Y) e.y = p.y; else e.y = undefined;
+      if (changed & ChangedField.Angle) e.angle = p.angle; else e.angle = undefined;
+      if (changed & ChangedField.Hp) e.hp = p.hp; else e.hp = undefined;
+      if (changed & ChangedField.Vel) { e.vx = p.vx; e.vy = p.vy; } else { e.vx = undefined; e.vy = undefined; }
       entities.push(e);
       if (changed) {
-        this.prevStates.set(p.id, { x: p.x, y: p.y, angle: p.angle, hp: p.hp, vx: p.vx, vy: p.vy });
+        prev.x = p.x; prev.y = p.y; prev.angle = p.angle; prev.hp = p.hp; prev.vx = p.vx; prev.vy = p.vy;
       }
     }
     return entities;
@@ -145,13 +161,16 @@ export class Room {
     const deltas = this.computeDeltas();
     const visible: EntityDelta[] = [];
     for (const p of this.players.values()) {
-      if (!p.ws) continue;
+      const ws = p.ws;
+      if (!ws) continue;
       visible.length = 0;
       for (const e of deltas) {
         if (this.inInterest(p, e)) visible.push(e);
       }
       const snap: Snapshot = { tick: this.tick, ackSeq: p.lastSeq, entities: visible };
-      p.ws.send(encodeSnapshot(snap), true);
+      ws.cork(() => {
+        ws.send(encodeSnapshot(snap), true);
+      });
     }
   }
 }
