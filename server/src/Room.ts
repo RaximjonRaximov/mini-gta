@@ -239,7 +239,7 @@ export class Room {
       return;
     }
     let best: Vehicle | null = null;
-    let bestDist = 40 * 40;
+    let bestDist = 100 * 100;
     for (const v of this.vehicles.values()) {
       if (v.driverId != null) continue;
       const dx = p.x - v.x;

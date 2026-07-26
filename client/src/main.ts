@@ -172,7 +172,6 @@ function onSnapshot(buf: ArrayBuffer): void {
   let foundLocal = false;
   let playerCount = 0;
   for (const e of snap.entities) {
-    if (e.color < 100) playerCount++;
     if (e.id === localPlayerId) {
       foundLocal = true;
       serverState.x = e.x ?? serverState.x;
@@ -183,6 +182,7 @@ function onSnapshot(buf: ArrayBuffer): void {
       serverState.hp = e.hp ?? serverState.hp;
       continue;
     }
+    if (e.color < 100) playerCount++;
     const now = performance.now();
     const ex = entities.get(e.id);
     if (ex) {
