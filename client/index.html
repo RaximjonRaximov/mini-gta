@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mikro GTA</title>
+  <style>
+    body { margin: 0; background: #0b0f19; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
+    #app { position: relative; width: 100vw; height: 100vh; }
+    canvas { display: block; width: 100%; height: 100%; background: #111827; }
+    .hud { position: absolute; top: 10px; left: 10px; display: flex; gap: 12px; pointer-events: none; }
+    .pill { background: rgba(15,23,42,0.85); padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+    .lobby { position: absolute; inset: 0; background: #0b0f19; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+    .lobby h1 { margin: 0; font-size: 48px; letter-spacing: -2px; background: linear-gradient(90deg,#4ade80,#38bdf8); -webkit-background-clip: text; color: transparent; }
+    .panel { background: #1e293b; padding: 24px; border-radius: 16px; min-width: 320px; max-width: 420px; display: flex; flex-direction: column; gap: 12px; }
+    input, button, select { font: inherit; padding: 10px 12px; border-radius: 8px; border: none; }
+    input, select { background: #0f172a; color: #fff; }
+    button { background: #22c55e; color: #020617; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #38bdf8; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .room-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .room-item { display: flex; justify-content: space-between; align-items: center; background: #0f172a; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+    .room-item:hover { background: #1e293b; }
+    .hidden { display: none !important; }
+    #help { position: absolute; bottom: 10px; left: 10px; color: #94a3b8; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game"></canvas>
+    <div id="lobby" class="lobby">
+      <h1>MIKRO GTA</h1>
+      <div class="panel">
+        <input id="player-name" placeholder="Ismingiz" value="Piyoz" maxlength="16" />
+        <div class="row">
+          <button id="btn-host">HOST</button>
+          <button id="btn-join" class="secondary">JOIN</button>
+        </div>
+      </div>
+      <div id="host-panel" class="panel hidden">
+        <input id="map-name" placeholder="Xarita nomi" value="Liberty Bean" />
+        <select id="max-players"><option>100</option><option>50</option><option>20</option><option>10</option></select>
+        <input id="room-password" type="password" placeholder="Parol (ixtiyoriy)" />
+        <button id="btn-create">Yaratish</button>
+      </div>
+      <div id="join-panel" class="panel hidden">
+        <input id="join-code" placeholder="6 xonali kod" maxlength="6" />
+        <button id="btn-join-code">Kod bilan qo'shilish</button>
+        <hr style="width:100%;border-color:#334155;" />
+        <div class="room-list" id="room-list"></div>
+      </div>
+    </div>
+    <div id="hud" class="hud hidden">
+      <div class="pill" id="fps">FPS: 0</div>
+      <div class="pill" id="ping">Ping: --</div>
+      <div class="pill" id="players">Players: 0</div>
+    </div>
+    <div id="help" class="hidden">WASD / arrows — harakat · Shift — yugurish · E — o'zaro ta'sir</div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
