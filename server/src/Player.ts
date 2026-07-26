@@ -34,6 +34,7 @@ export class Player {
   respawnTick = 0;
   kills = 0;
   deaths = 0;
+  wanted = 0;
 
   lastInput: InputFrame = { seq: 0, keys: 0, actions: 0, angle: 0, time: 0 };
 

@@ -305,6 +305,19 @@ export function decodeKillEvent(buf: ArrayBuffer): { killerId: number; victimId:
   return { killerId: v.getUint16(2, true), victimId: v.getUint16(4, true) };
 }
 
+export function encodeWantedEvent(level: number): ArrayBuffer {
+  const buf = new ArrayBuffer(3);
+  const v = new DataView(buf);
+  v.setUint8(0, Op.Event);
+  v.setUint8(1, 0x04);
+  v.setUint8(2, level);
+  return buf;
+}
+
+export function decodeWantedEvent(buf: ArrayBuffer): number {
+  return new DataView(buf).getUint8(2);
+}
+
 // --- City generation ---
 export interface Rect {
   x: number;

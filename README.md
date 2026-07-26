@@ -1,6 +1,6 @@
 # Mikro GTA
 
-Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 4 adds basic combat (pistol hitscan, HP, respawn, kill feed) on top of the vehicle/city skeleton.
+Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 5 adds NPCs (chickens, pedestrians) and a basic wanted level on top of combat/vehicles.
 
 ## Quick start
 

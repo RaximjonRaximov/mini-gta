@@ -1,7 +1,8 @@
 import { Player, sanitizeName, type UwsSocket } from './types.js';
 import { World } from './World.js';
 import { Vehicle, getVehicleChanged } from './Vehicle.js';
-import { encodeSnapshot, encodeVehicleEvent, encodeKillEvent, ChangedField, InputKey, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, WEAPONS, wrapAngle, type Snapshot, type EntityDelta } from '@mini-gta/shared';
+import { Npc, getNpcChanged, NPC_TYPE_CHICKEN, NPC_TYPE_PED } from './Npc.js';
+import { encodeSnapshot, encodeVehicleEvent, encodeKillEvent, encodeWantedEvent, ChangedField, InputKey, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, WEAPONS, wrapAngle, type Snapshot, type EntityDelta } from '@mini-gta/shared';
 
 export interface RoomData {
   id: string;
@@ -37,10 +38,13 @@ export class Room {
   // previous states for delta snapshots
   prevStates = new Map<number, { x: number; y: number; angle: number; hp: number; vx: number; vy: number }>();
   vehiclePrevStates = new Map<number, { x: number; y: number; angle: number; hp: number; vx: number; vy: number }>();
+  npcPrevStates = new Map<number, { x: number; y: number; angle: number; hp: number; vx: number; vy: number }>();
   private deltaPool: EntityDelta[] = [];
   world: World;
   vehicles = new Map<number, Vehicle>();
   nextVehicleId = 1000;
+  npcs = new Map<number, Npc>();
+  nextNpcId = 5000;
 
   constructor(id: string, joinCode: string, mapName: string, seed: string, maxPlayers: number, password?: string) {
     this.id = id;
@@ -51,6 +55,7 @@ export class Room {
     this.passwordHash = password || null;
     this.world = new World(seed);
     this.spawnTraffic(20);
+    this.spawnNpcs();
   }
 
   publicInfo(): RoomData {
@@ -157,6 +162,24 @@ export class Room {
     return password === this.passwordHash;
   }
 
+  private spawnNpcs(): void {
+    for (let i = 0; i < 200; i++) this.spawnOneNpc(NPC_TYPE_CHICKEN);
+    for (let i = 0; i < 100; i++) this.spawnOneNpc(NPC_TYPE_PED);
+  }
+
+  private spawnOneNpc(type = 0): Npc | null {
+    for (let i = 0; i < 20; i++) {
+      const x = 100 + Math.random() * (WORLD_SIZE - 200);
+      const y = 100 + Math.random() * (WORLD_SIZE - 200);
+      if (this.world.collides(x, y, 8)) continue;
+      const n = new Npc(this.nextNpcId++, x, y, type);
+      this.npcs.set(n.id, n);
+      this.npcPrevStates.set(n.id, { x: -1, y: -1, angle: -1, hp: 0, vx: 0, vy: 0 });
+      return n;
+    }
+    return null;
+  }
+
   update(dt: number): void {
     this.tickAcc += dt;
     if (this.tickAcc < 1 / TICK_RATE) return;
@@ -204,6 +227,12 @@ export class Room {
         this.world.resolve(p, oldX, oldY);
       }
       if (p.lastInput.keys & InputKey.Fire) this.fireWeapon(p);
+      if (p.wanted > 0) {
+        const beforeLevel = Math.min(5, Math.floor(p.wanted / 20));
+        p.wanted = Math.max(0, p.wanted - 0.05);
+        const afterLevel = Math.min(5, Math.floor(p.wanted / 20));
+        if (afterLevel !== beforeLevel && p.ws) p.ws.send(encodeWantedEvent(afterLevel), true);
+      }
     }
     for (const v of this.vehicles.values()) {
       if (v.driverId != null) continue;
@@ -228,6 +257,34 @@ export class Room {
         v.angle = Math.random() * Math.PI * 2;
       }
     }
+    for (const n of this.npcs.values()) {
+      const tdt = 1 / TICK_RATE;
+      const oldX = n.x;
+      const oldY = n.y;
+      if (n.panic > 0) n.panic--;
+      else if (Math.random() < 0.05 * n.type) n.targetAngle = Math.random() * Math.PI * 2;
+      const speed = Math.hypot(n.vx, n.vy);
+      if (speed < n.maxSpeed) {
+        n.vx += Math.cos(n.targetAngle) * n.accel * tdt;
+        n.vy += Math.sin(n.targetAngle) * n.accel * tdt;
+      }
+      n.vx *= 0.94;
+      n.vy *= 0.94;
+      n.x += n.vx * tdt;
+      n.y += n.vy * tdt;
+      n.angle = Math.atan2(n.vy, n.vx) || n.targetAngle;
+      this.world.resolve(n, oldX, oldY, n.radius);
+      if (n.hp <= 0) this.respawnNpc(n);
+    }
+  }
+
+  private respawnNpc(n: Npc): void {
+    for (let i = 0; i < 20; i++) {
+      const x = 100 + Math.random() * (WORLD_SIZE - 200);
+      const y = 100 + Math.random() * (WORLD_SIZE - 200);
+      if (!this.world.collides(x, y, 8)) { n.x = x; n.y = y; break; }
+    }
+    n.vx = 0; n.vy = 0; n.hp = n.type === NPC_TYPE_CHICKEN ? 10 : 30; n.panic = 0;
   }
 
   tryEnterExit(p: Player): void {
@@ -277,8 +334,8 @@ export class Room {
     const weapon = WEAPONS[p.weapon];
     if (!weapon || this.tick - p.lastFireTick < weapon.fireRateTicks) return;
     p.lastFireTick = this.tick;
-    const aim = p.vehicleId ? p.lastInput.angle : p.angle;
-    let best: Player | null = null;
+    const aim = p.lastInput.angle;
+    let best: Player | Npc | null = null;
     let bestDist = weapon.range;
     for (const q of this.players.values()) {
       if (q.id === p.id || q.dead) continue;
@@ -291,9 +348,35 @@ export class Room {
       if (perp > weapon.spread) continue;
       if (dist < bestDist) { bestDist = dist; best = q; }
     }
+    for (const n of this.npcs.values()) {
+      const dx = n.x - p.x;
+      const dy = n.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > weapon.range) continue;
+      const angleTo = Math.atan2(dy, dx);
+      const perp = Math.abs(Math.sin(wrapAngle(aim - angleTo))) * dist;
+      if (perp > weapon.spread) continue;
+      if (dist < bestDist) { bestDist = dist; best = n; }
+    }
     if (!best) return;
     best.hp -= weapon.damage;
-    if (best.hp <= 0) this.killPlayer(p, best);
+    if (best instanceof Player) {
+      this.addWanted(p, best.hp <= 0 ? 10 : 5);
+      if (best.hp <= 0) this.killPlayer(p, best);
+    }
+    if (best instanceof Npc) {
+      best.panic = 60;
+      best.targetAngle = aim + Math.PI;
+      if (best.hp <= 0) this.addWanted(p, 2);
+    }
+  }
+
+  addWanted(p: Player, amount: number): void {
+    const before = p.wanted;
+    p.wanted = Math.min(100, p.wanted + amount);
+    const beforeLevel = Math.min(5, Math.floor(before / 20));
+    const afterLevel = Math.min(5, Math.floor(p.wanted / 20));
+    if (afterLevel !== beforeLevel && p.ws) p.ws.send(encodeWantedEvent(afterLevel), true);
   }
 
   killPlayer(killer: Player, victim: Player): void {
@@ -358,6 +441,18 @@ export class Room {
       entities.push(e);
       if (changed) {
         prev.x = v.x; prev.y = v.y; prev.angle = v.angle; prev.hp = v.hp; prev.vx = v.vx; prev.vy = v.vy;
+      }
+    }
+    for (const n of this.npcs.values()) {
+      let e = this.deltaPool[i];
+      if (!e) { e = { id: n.id, changed: 0 }; this.deltaPool[i] = e; }
+      i++;
+      const prev = this.npcPrevStates.get(n.id)!;
+      const changed = getNpcChanged(n, prev);
+      this.pushDelta(e, n.id, changed, 200 + n.type, n);
+      entities.push(e);
+      if (changed) {
+        prev.x = n.x; prev.y = n.y; prev.angle = n.angle; prev.hp = n.hp; prev.vx = n.vx; prev.vy = n.vy;
       }
     }
     return entities;

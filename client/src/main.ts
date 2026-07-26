@@ -23,6 +23,7 @@ const roomListEl = document.getElementById('room-list') as HTMLDivElement;
 const fpsEl = document.getElementById('fps') as HTMLDivElement;
 const pingEl = document.getElementById('ping') as HTMLDivElement;
 const playersEl = document.getElementById('players') as HTMLDivElement;
+const wantedEl = document.getElementById('wanted') as HTMLDivElement;
 const killFeedEl = document.getElementById('kill-feed') as HTMLDivElement;
 
 const keys: Record<string, boolean> = {};
@@ -80,7 +81,13 @@ let lastRender = performance.now();
 let fps = 0;
 let city: City | null = null;
 let localVehicleId = 0;
+let localWanted = 0;
 const idToName = new Map<number, string>();
+
+function setWanted(level: number): void {
+  localWanted = level;
+  wantedEl.textContent = 'Wanted: ' + (level ? '★'.repeat(level) : '0');
+}
 
 function addKillFeed(killerId: number, victimId: string | number): void {
   killFeedEl.classList.remove('hidden');
@@ -235,6 +242,8 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     hud.classList.remove('hidden');
     help.classList.remove('hidden');
     killFeedEl.classList.remove('hidden');
+    setWanted(0);
+    killFeedEl.innerHTML = '';
     // identify as local; server will not send local id explicitly in v1, we infer by matching snapshot ack
     lastPingSent = performance.now();
     const ping = new ArrayBuffer(1); new Uint8Array(ping)[0] = Op.Ping; ws!.send(ping);
@@ -260,6 +269,8 @@ function connect(wsUrl: string, name: string, roomId: string): void {
         } else if (sub === 0x03) {
           const { killerId, victimId } = decodeKillEvent(ev.data);
           addKillFeed(killerId, victimId);
+        } else if (sub === 0x04) {
+          setWanted(decodeWantedEvent(ev.data));
         }
       }
     }
@@ -268,6 +279,8 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     hud.classList.add('hidden');
     help.classList.add('hidden');
     killFeedEl.classList.add('hidden');
+    killFeedEl.innerHTML = '';
+    setWanted(0);
     lobby.classList.remove('hidden');
   };
 }
@@ -385,6 +398,21 @@ function drawPlayerBody(cx: number, cy: number, angle: number, color: number, hp
   if (hp > 0 && hp < 100) drawHealthBar(cx, cy, hp);
 }
 
+function drawNpc(cx: number, cy: number, type: number, angle: number): void {
+  if (type === 0) {
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(angle) * 8, cy + Math.sin(angle) * 8); ctx.stroke();
+  } else if (type === 1) {
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(cx - 4, cy - 4, 8, 8);
+  } else {
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx - 5, cy + 5); ctx.lineTo(cx + 5, cy + 5); ctx.fill();
+  }
+}
+
 function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
   // interpolate from prev to current
   const t = Math.min(1, Math.max(0, (now - e.lastUpdated + interpMs) / interpMs));
@@ -393,7 +421,9 @@ function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
   const cx = x - (localState.x - canvas.width / 2);
   const cy = y - (localState.y - canvas.height / 2);
   if (e.id === localVehicleId) return;
-  if (e.color >= 100) {
+  if (e.color >= 200) {
+    drawNpc(cx, cy, e.color - 200, e.angle);
+  } else if (e.color >= 100) {
     drawVehicleBody(cx, cy, e.angle, e.color - 100);
   } else {
     drawPlayerBody(cx, cy, e.angle, e.color, e.hp);
