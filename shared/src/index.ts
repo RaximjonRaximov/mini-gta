@@ -79,7 +79,7 @@ export interface Weapon {
 }
 
 export const WEAPONS: Record<string, Weapon> = {
-  pistol: { name: 'pistol', damage: 25, fireRateTicks: 8, range: 900, spread: 24 },
+  pistol: { name: 'pistol', damage: 25, fireRateTicks: 8, range: 900, spread: 64 },
 };
 
 export function wrapAngle(a: number): number {
@@ -316,6 +316,19 @@ export function encodeWantedEvent(level: number): ArrayBuffer {
 
 export function decodeWantedEvent(buf: ArrayBuffer): number {
   return new DataView(buf).getUint8(2);
+}
+
+export function encodeMoneyEvent(amount: number): ArrayBuffer {
+  const buf = new ArrayBuffer(6);
+  const v = new DataView(buf);
+  v.setUint8(0, Op.Event);
+  v.setUint8(1, 0x08);
+  v.setUint32(2, amount >>> 0, true);
+  return buf;
+}
+
+export function decodeMoneyEvent(buf: ArrayBuffer): number {
+  return new DataView(buf).getUint32(2, true);
 }
 
 // --- City generation ---

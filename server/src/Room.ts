@@ -2,7 +2,7 @@ import { Player, sanitizeName, type UwsSocket } from './types.js';
 import { World } from './World.js';
 import { Vehicle, getVehicleChanged } from './Vehicle.js';
 import { Npc, getNpcChanged, NPC_TYPE_CHICKEN, NPC_TYPE_PED } from './Npc.js';
-import { encodeSnapshot, encodeVehicleEvent, encodeKillEvent, encodeWantedEvent, ChangedField, InputKey, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, WEAPONS, wrapAngle, type Snapshot, type EntityDelta } from '@mini-gta/shared';
+import { encodeSnapshot, encodeVehicleEvent, encodeKillEvent, encodeWantedEvent, encodeMoneyEvent, ChangedField, InputKey, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, WEAPONS, wrapAngle, type Snapshot, type EntityDelta } from '@mini-gta/shared';
 
 export interface RoomData {
   id: string;
@@ -367,7 +367,7 @@ export class Room {
     if (best instanceof Npc) {
       best.panic = 60;
       best.targetAngle = aim + Math.PI;
-      if (best.hp <= 0) this.addWanted(p, 2);
+      if (best.hp <= 0) { this.addWanted(p, 2); this.changeMoney(p, 5); }
     }
   }
 
@@ -379,12 +379,20 @@ export class Room {
     if (afterLevel !== beforeLevel && p.ws) p.ws.send(encodeWantedEvent(afterLevel), true);
   }
 
+  changeMoney(p: Player, delta: number): void {
+    p.money = Math.max(0, p.money + delta);
+    if (p.ws) p.ws.send(encodeMoneyEvent(p.money), true);
+  }
+
   killPlayer(killer: Player, victim: Player): void {
     victim.hp = 0;
     victim.dead = true;
     victim.respawnTick = this.tick + 80; // 4 s at 20 Hz
     victim.deaths++;
     killer.kills++;
+    const loot = Math.floor(victim.money / 2);
+    this.changeMoney(killer, 50 + loot);
+    this.changeMoney(victim, -loot);
     if (victim.vehicleId) {
       const v = this.vehicles.get(victim.vehicleId);
       if (v) v.driverId = null;

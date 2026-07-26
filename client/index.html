@@ -27,6 +27,15 @@
     #help { position: absolute; bottom: 10px; left: 10px; color: #94a3b8; font-size: 12px; }
     #kill-feed { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #e2e8f0; }
     #kill-feed .row { background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; }
+    #mute-btn { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); color: #e2e8f0; border: none; border-radius: 8px; padding: 8px 10px; font-size: 16px; cursor: pointer; }
+    #lang-btn { position: absolute; top: 10px; left: 60px; background: rgba(0,0,0,0.5); color: #e2e8f0; border: none; border-radius: 8px; padding: 8px 10px; font-size: 12px; cursor: pointer; }
+    #touch-controls { position: absolute; inset: 0; pointer-events: none; }
+    #joystick { position: absolute; bottom: 24px; left: 24px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; pointer-events: auto; touch-action: none; }
+    #joystick-knob { position: absolute; top: 40px; left: 40px; width: 40px; height: 40px; background: rgba(255,255,255,0.5); border-radius: 50%; }
+    .touch-btn { position: absolute; bottom: 24px; width: 72px; height: 72px; background: rgba(255,255,255,0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: bold; pointer-events: auto; touch-action: none; user-select: none; }
+    #touch-fire { right: 24px; }
+    #touch-enter { right: 110px; }
+    @media (hover: hover) and (pointer: fine) { #touch-controls { display: none !important; } }
   </style>
 </head>
 <body>
@@ -59,9 +68,17 @@
       <div class="pill" id="ping">Ping: --</div>
       <div class="pill" id="players">Players: 0</div>
       <div class="pill" id="wanted">Wanted: 0</div>
+      <div class="pill" id="money">Money: 0</div>
     </div>
     <div id="kill-feed" class="hidden"></div>
-    <div id="help" class="hidden">WASD / arrows — harakat · Shift — yugurish · Sichqoncha chap tugmasi — o'q · Space — mashina kir/chiq · E — o'zaro ta'sir</div>
+    <button id="mute-btn" class="hidden">🔊</button>
+    <button id="lang-btn" class="hidden">UZ</button>
+    <div id="touch-controls" class="hidden">
+      <div id="joystick"><div id="joystick-knob"></div></div>
+      <div id="touch-fire" class="touch-btn">FIRE</div>
+      <div id="touch-enter" class="touch-btn">CAR</div>
+    </div>
+    <div id="help" class="hidden"></div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

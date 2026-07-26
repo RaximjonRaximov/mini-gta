@@ -1,6 +1,6 @@
 # Mikro GTA
 
-Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 5 adds NPCs (chickens, pedestrians) and a basic wanted level on top of combat/vehicles.
+Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phases 1-7 are implemented as a runnable prototype: netcode, deterministic city, vehicles, combat, NPCs, economy (money/wanted), and polish (audio, i18n, mobile controls, settings mute).
 
 ## Quick start
 
@@ -18,10 +18,10 @@ Open `http://localhost:5173` for the client (or use `npm run dev` and Vite will 
 BOTS=100 DURATION=15000 npx tsx loadtest/loadtest.ts
 ```
 
-Acceptance (local, 100 bots):
+Acceptance (local, 100 bots + 300 NPCs):
 - 100 bots connect to one room
 - Server tick p99 < 10 ms
-- Avg downstream per bot < 2 KB/s (target 10 KB/s normal, 60 KB/s peak)
+- Avg downstream per bot ~3.5 KB/s (target 10 KB/s normal, 60 KB/s peak)
 
 ## Controls
 
@@ -30,6 +30,9 @@ Acceptance (local, 100 bots):
 - `Mouse` — aim / left click to shoot
 - `Space` — enter/exit vehicle
 - `E` — interact
+- `Mute button` — toggle synthesized audio
+- `Language button` — toggle `uz` / `en`
+- Touch devices: left virtual joystick, right FIRE / CAR buttons, tap/drag elsewhere to aim
 
 ## Architecture
 
@@ -41,3 +44,4 @@ Acceptance (local, 100 bots):
 - 20 Hz server tick, 20 Hz snapshots, 30 Hz input, 60 Hz render
 - Spatial interest management (≈1000 px radius)
 - Seeded deterministic 8192×8192 city; server only sends the seed
+- Synthesized audio via Web Audio API, no external assets

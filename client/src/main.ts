@@ -1,4 +1,6 @@
-import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, decodeVehicleEvent, decodeKillEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
+import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, decodeVehicleEvent, decodeKillEvent, decodeWantedEvent, decodeMoneyEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
+import { playShoot, playExplosion, setMuted, isMuted } from './audio.js';
+import { t, setLang, getLang, type Lang } from './i18n.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -24,13 +26,98 @@ const fpsEl = document.getElementById('fps') as HTMLDivElement;
 const pingEl = document.getElementById('ping') as HTMLDivElement;
 const playersEl = document.getElementById('players') as HTMLDivElement;
 const wantedEl = document.getElementById('wanted') as HTMLDivElement;
+const moneyEl = document.getElementById('money') as HTMLDivElement;
 const killFeedEl = document.getElementById('kill-feed') as HTMLDivElement;
+const muteBtn = document.getElementById('mute-btn') as HTMLButtonElement;
+const langBtn = document.getElementById('lang-btn') as HTMLButtonElement;
+const touchControls = document.getElementById('touch-controls') as HTMLDivElement;
+const joystick = document.getElementById('joystick') as HTMLDivElement;
+const joystickKnob = document.getElementById('joystick-knob') as HTMLDivElement;
+const touchFire = document.getElementById('touch-fire') as HTMLDivElement;
+const touchEnter = document.getElementById('touch-enter') as HTMLDivElement;
 
 const keys: Record<string, boolean> = {};
 let mouseX = 0;
 let mouseY = 0;
 let canvasRect = { left: 0, top: 0 };
 let firing = false;
+let wasFiring = false;
+
+muteBtn.addEventListener('click', () => {
+  setMuted(!isMuted());
+  muteBtn.textContent = isMuted() ? '🔇' : '🔊';
+});
+
+function applyLang(): void {
+  langBtn.textContent = getLang().toUpperCase();
+  help.textContent = t('help');
+  btnHost.textContent = t('host');
+  btnJoin.textContent = t('join');
+  btnCreate.textContent = t('create');
+  btnJoinCode.textContent = t('joinCode');
+  playerNameEl.placeholder = t('namePlaceholder');
+  mapNameEl.placeholder = t('mapPlaceholder');
+}
+
+langBtn.addEventListener('click', () => {
+  const next: Lang = getLang() === 'uz' ? 'en' : 'uz';
+  setLang(next);
+  applyLang();
+});
+
+let joyTouchId: number | null = null;
+const joyCenter = { x: 0, y: 0 };
+function updateJoystick(touch: Touch): void {
+  const rect = joystick.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const dx = touch.clientX - cx;
+  const dy = touch.clientY - cy;
+  const dist = Math.hypot(dx, dy);
+  const max = rect.width / 2 - 20;
+  const scale = dist > max ? max / dist : 1;
+  joystickKnob.style.transform = `translate(${dx * scale}px, ${dy * scale}px)`;
+  keys['KeyW'] = dy < -10; keys['KeyS'] = dy > 10; keys['KeyA'] = dx < -10; keys['KeyD'] = dx > 10;
+}
+function resetJoystick(): void {
+  joystickKnob.style.transform = '';
+  keys['KeyW'] = false; keys['KeyS'] = false; keys['KeyA'] = false; keys['KeyD'] = false;
+  joyTouchId = null;
+}
+joystick.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.changedTouches[0]; joyTouchId = t.identifier; updateJoystick(t);
+}, { passive: false });
+joystick.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) if (t.identifier === joyTouchId) updateJoystick(t);
+}, { passive: false });
+joystick.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) if (t.identifier === joyTouchId) resetJoystick();
+}, { passive: false });
+joystick.addEventListener('touchcancel', (e) => { e.preventDefault(); resetJoystick(); }, { passive: false });
+
+touchFire.addEventListener('touchstart', (e) => { e.preventDefault(); firing = true; }, { passive: false });
+touchFire.addEventListener('touchend', (e) => { e.preventDefault(); firing = false; }, { passive: false });
+touchFire.addEventListener('touchcancel', (e) => { e.preventDefault(); firing = false; }, { passive: false });
+
+touchEnter.addEventListener('touchstart', (e) => { e.preventDefault(); keys['Space'] = true; }, { passive: false });
+touchEnter.addEventListener('touchend', (e) => { e.preventDefault(); keys['Space'] = false; }, { passive: false });
+touchEnter.addEventListener('touchcancel', (e) => { e.preventDefault(); keys['Space'] = false; }, { passive: false });
+
+window.addEventListener('touchstart', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.target === touchFire || t.target === touchEnter || t.target === joystick || t.target === joystickKnob) continue;
+    mouseX = t.clientX - canvasRect.left; mouseY = t.clientY - canvasRect.top;
+  }
+}, { passive: true });
+window.addEventListener('touchmove', (e) => {
+  for (const t of e.changedTouches) {
+    if (t.target === touchFire || t.target === touchEnter || t.target === joystick || t.target === joystickKnob) continue;
+    mouseX = t.clientX - canvasRect.left; mouseY = t.clientY - canvasRect.top;
+  }
+}, { passive: true });
 
 window.addEventListener('keydown', (e) => { keys[e.code] = true; });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -82,11 +169,17 @@ let fps = 0;
 let city: City | null = null;
 let localVehicleId = 0;
 let localWanted = 0;
+let localMoney = 0;
 const idToName = new Map<number, string>();
 
 function setWanted(level: number): void {
   localWanted = level;
   wantedEl.textContent = 'Wanted: ' + (level ? '★'.repeat(level) : '0');
+}
+
+function setMoney(amount: number): void {
+  localMoney = amount;
+  moneyEl.textContent = 'Money: $' + amount;
 }
 
 function addKillFeed(killerId: number, victimId: string | number): void {
@@ -111,6 +204,8 @@ function buildInputPacket(): ArrayBuffer {
   if (firing) k |= InputKey.Fire;
   if (keys['Space']) k |= InputKey.EnterExit;
   if (keys['KeyE']) k |= InputKey.Interact;
+  if (firing && !wasFiring) playShoot();
+  wasFiring = firing;
   const angle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
   inputSeq = (inputSeq + 1) % 65536;
   return encodeInput(inputSeq, k, 0, angle);
@@ -225,7 +320,9 @@ function onSnapshot(buf: ArrayBuffer): void {
     }
   }
   if (foundLocal) {
+    const prevHp = localState.hp;
     localState.hp = serverState.hp;
+    if (localState.hp <= 0 && prevHp > 0) playExplosion();
     reconcile();
   }
   if (foundLocal) playerCount++;
@@ -242,7 +339,11 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     hud.classList.remove('hidden');
     help.classList.remove('hidden');
     killFeedEl.classList.remove('hidden');
+    muteBtn.classList.remove('hidden');
+    langBtn.classList.remove('hidden');
+    if ('ontouchstart' in window) touchControls.classList.remove('hidden');
     setWanted(0);
+    setMoney(0);
     killFeedEl.innerHTML = '';
     // identify as local; server will not send local id explicitly in v1, we infer by matching snapshot ack
     lastPingSent = performance.now();
@@ -271,6 +372,8 @@ function connect(wsUrl: string, name: string, roomId: string): void {
           addKillFeed(killerId, victimId);
         } else if (sub === 0x04) {
           setWanted(decodeWantedEvent(ev.data));
+        } else if (sub === 0x08) {
+          setMoney(decodeMoneyEvent(ev.data));
         }
       }
     }
@@ -279,8 +382,12 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     hud.classList.add('hidden');
     help.classList.add('hidden');
     killFeedEl.classList.add('hidden');
+    muteBtn.classList.add('hidden');
+    langBtn.classList.add('hidden');
+    touchControls.classList.add('hidden');
     killFeedEl.innerHTML = '';
     setWanted(0);
+    setMoney(0);
     lobby.classList.remove('hidden');
   };
 }
@@ -486,3 +593,4 @@ function loop(): void {
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+applyLang();
