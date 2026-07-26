@@ -33,6 +33,7 @@ function randomKeys(): number {
   if (Math.random() < 0.5) k |= InputKey.Left;
   if (Math.random() < 0.5) k |= InputKey.Right;
   if (Math.random() < 0.2) k |= InputKey.Sprint;
+  if (Math.random() < 0.05) k |= InputKey.Fire;
   return k;
 }
 

@@ -1,4 +1,4 @@
-import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, decodeVehicleEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
+import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, decodeVehicleEvent, decodeKillEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -23,14 +23,18 @@ const roomListEl = document.getElementById('room-list') as HTMLDivElement;
 const fpsEl = document.getElementById('fps') as HTMLDivElement;
 const pingEl = document.getElementById('ping') as HTMLDivElement;
 const playersEl = document.getElementById('players') as HTMLDivElement;
+const killFeedEl = document.getElementById('kill-feed') as HTMLDivElement;
 
 const keys: Record<string, boolean> = {};
 let mouseX = 0;
 let mouseY = 0;
 let canvasRect = { left: 0, top: 0 };
+let firing = false;
 
 window.addEventListener('keydown', (e) => { keys[e.code] = true; });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+window.addEventListener('mousedown', () => { firing = true; });
+window.addEventListener('mouseup', () => { firing = false; });
 window.addEventListener('mousemove', (e) => {
   mouseX = e.clientX - canvasRect.left;
   mouseY = e.clientY - canvasRect.top;
@@ -76,6 +80,19 @@ let lastRender = performance.now();
 let fps = 0;
 let city: City | null = null;
 let localVehicleId = 0;
+const idToName = new Map<number, string>();
+
+function addKillFeed(killerId: number, victimId: string | number): void {
+  killFeedEl.classList.remove('hidden');
+  const row = document.createElement('div');
+  row.className = 'row';
+  const k = idToName.get(killerId) || `Player ${killerId}`;
+  const v = typeof victimId === 'string' ? victimId : (idToName.get(victimId) || `Player ${victimId}`);
+  row.textContent = `${k} → ${v}`;
+  killFeedEl.appendChild(row);
+  if (killFeedEl.children.length > 5) killFeedEl.removeChild(killFeedEl.firstChild!);
+  setTimeout(() => { if (killFeedEl.contains(row)) killFeedEl.removeChild(row); }, 5000);
+}
 
 function buildInputPacket(): ArrayBuffer {
   let k = 0;
@@ -84,6 +101,7 @@ function buildInputPacket(): ArrayBuffer {
   if (keys['KeyA'] || keys['ArrowLeft']) k |= InputKey.Left;
   if (keys['KeyD'] || keys['ArrowRight']) k |= InputKey.Right;
   if (keys['ShiftLeft'] || keys['ShiftRight']) k |= InputKey.Sprint;
+  if (firing) k |= InputKey.Fire;
   if (keys['Space']) k |= InputKey.EnterExit;
   if (keys['KeyE']) k |= InputKey.Interact;
   const angle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
@@ -92,6 +110,7 @@ function buildInputPacket(): ArrayBuffer {
 }
 
 function applyLocalInput(dt: number, keys: number, angle: number): void {
+  if (localState.hp <= 0) return;
   if (localVehicleId) {
     // arcade car physics prediction
     let throttle = 0, steer = 0;
@@ -198,7 +217,10 @@ function onSnapshot(buf: ArrayBuffer): void {
       });
     }
   }
-  if (foundLocal) reconcile();
+  if (foundLocal) {
+    localState.hp = serverState.hp;
+    reconcile();
+  }
   if (foundLocal) playerCount++;
   playersEl.textContent = `Players: ${playerCount}`;
 }
@@ -212,6 +234,7 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     lobby.classList.add('hidden');
     hud.classList.remove('hidden');
     help.classList.remove('hidden');
+    killFeedEl.classList.remove('hidden');
     // identify as local; server will not send local id explicitly in v1, we infer by matching snapshot ack
     lastPingSent = performance.now();
     const ping = new ArrayBuffer(1); new Uint8Array(ping)[0] = Op.Ping; ws!.send(ping);
@@ -234,6 +257,9 @@ function connect(wsUrl: string, name: string, roomId: string): void {
           city = generateCity(seed);
         } else if (sub === 0x02) {
           localVehicleId = decodeVehicleEvent(ev.data);
+        } else if (sub === 0x03) {
+          const { killerId, victimId } = decodeKillEvent(ev.data);
+          addKillFeed(killerId, victimId);
         }
       }
     }
@@ -241,6 +267,7 @@ function connect(wsUrl: string, name: string, roomId: string): void {
   ws.onclose = () => {
     hud.classList.add('hidden');
     help.classList.add('hidden');
+    killFeedEl.classList.add('hidden');
     lobby.classList.remove('hidden');
   };
 }
@@ -340,11 +367,22 @@ function drawVehicleBody(cx: number, cy: number, angle: number, color: number, s
   ctx.restore();
 }
 
-function drawPlayerBody(cx: number, cy: number, angle: number, color: number): void {
-  ctx.fillStyle = '#' + playerColor(color).toString(16).padStart(6, '0');
+function drawHealthBar(cx: number, cy: number, hp: number): void {
+  const w = 24;
+  const h = 4;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(cx - w / 2 - 1, cy - 20 - 1, w + 2, h + 2);
+  ctx.fillStyle = hp > 50 ? '#22c55e' : hp > 25 ? '#eab308' : '#ef4444';
+  ctx.fillRect(cx - w / 2, cy - 20, w * Math.max(0, hp) / 100, h);
+}
+
+function drawPlayerBody(cx: number, cy: number, angle: number, color: number, hp: number): void {
+  if (hp <= 0) ctx.fillStyle = '#64748b';
+  else ctx.fillStyle = '#' + playerColor(color).toString(16).padStart(6, '0');
   ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(angle) * 18, cy + Math.sin(angle) * 18); ctx.stroke();
+  if (hp > 0 && hp < 100) drawHealthBar(cx, cy, hp);
 }
 
 function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
@@ -358,7 +396,7 @@ function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
   if (e.color >= 100) {
     drawVehicleBody(cx, cy, e.angle, e.color - 100);
   } else {
-    drawPlayerBody(cx, cy, e.angle, e.color);
+    drawPlayerBody(cx, cy, e.angle, e.color, e.hp);
   }
 }
 
@@ -372,10 +410,12 @@ function drawLocalPlayer(): void {
   // white outline so the local player is always visible on any background
   ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(cx, cy, 15, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = '#4ade80';
+  if (localState.hp <= 0) ctx.fillStyle = '#64748b';
+  else ctx.fillStyle = '#4ade80';
   ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(localState.angle) * 24, cy + Math.sin(localState.angle) * 24); ctx.stroke();
+  if (localState.hp > 0 && localState.hp < 100) drawHealthBar(cx, cy, localState.hp);
 }
 
 // --- main loop ---

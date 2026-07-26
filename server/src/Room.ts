@@ -1,7 +1,7 @@
 import { Player, sanitizeName, type UwsSocket } from './types.js';
 import { World } from './World.js';
 import { Vehicle, getVehicleChanged } from './Vehicle.js';
-import { encodeSnapshot, encodeVehicleEvent, ChangedField, InputKey, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, type Snapshot, type EntityDelta } from '@mini-gta/shared';
+import { encodeSnapshot, encodeVehicleEvent, encodeKillEvent, ChangedField, InputKey, TICK_RATE, WORLD_SIZE, PLAYER_COLORS, WEAPONS, wrapAngle, type Snapshot, type EntityDelta } from '@mini-gta/shared';
 
 export interface RoomData {
   id: string;
@@ -163,6 +163,10 @@ export class Room {
     this.tickAcc -= 1 / TICK_RATE;
     this.tick++;
     for (const p of this.players.values()) {
+      if (p.dead) {
+        if (this.tick >= p.respawnTick) this.respawnPlayer(p);
+        continue;
+      }
       if (p.vehicleId) {
         const v = this.vehicles.get(p.vehicleId);
         if (v) {
@@ -189,7 +193,7 @@ export class Room {
           this.world.resolve(v, oldX, oldY, v.radius);
           if (v.x === oldX && v.y === oldY && speed > 400) {
             v.hp -= Math.floor(speed / 10);
-            if (v.hp <= 0) { this.respawnVehicle(v); p.vehicleId = null; }
+            if (v.hp <= 0) { this.respawnVehicle(v); p.vehicleId = null; p.dead = true; p.respawnTick = this.tick + 80; p.deaths++; }
           }
           p.x = v.x; p.y = v.y; p.angle = v.angle; p.vx = v.vx; p.vy = v.vy;
         }
@@ -199,6 +203,7 @@ export class Room {
         p.applyInput(1 / TICK_RATE);
         this.world.resolve(p, oldX, oldY);
       }
+      if (p.lastInput.keys & InputKey.Fire) this.fireWeapon(p);
     }
     for (const v of this.vehicles.values()) {
       if (v.driverId != null) continue;
@@ -252,6 +257,59 @@ export class Room {
       p.vehicleId = best.id;
       p.x = best.x; p.y = best.y; p.angle = best.angle;
       if (p.ws) p.ws.send(encodeVehicleEvent(best.id), true);
+    }
+  }
+
+  respawnPlayer(p: Player): void {
+    p.dead = false;
+    p.hp = 100;
+    p.vx = 0; p.vy = 0;
+    let x = 100 + Math.random() * (WORLD_SIZE - 200);
+    let y = 100 + Math.random() * (WORLD_SIZE - 200);
+    for (let i = 0; i < 20 && this.world.collides(x, y, 10); i++) {
+      x = 100 + Math.random() * (WORLD_SIZE - 200);
+      y = 100 + Math.random() * (WORLD_SIZE - 200);
+    }
+    p.x = x; p.y = y;
+  }
+
+  fireWeapon(p: Player): void {
+    const weapon = WEAPONS[p.weapon];
+    if (!weapon || this.tick - p.lastFireTick < weapon.fireRateTicks) return;
+    p.lastFireTick = this.tick;
+    const aim = p.vehicleId ? p.lastInput.angle : p.angle;
+    let best: Player | null = null;
+    let bestDist = weapon.range;
+    for (const q of this.players.values()) {
+      if (q.id === p.id || q.dead) continue;
+      const dx = q.x - p.x;
+      const dy = q.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > weapon.range) continue;
+      const angleTo = Math.atan2(dy, dx);
+      const perp = Math.abs(Math.sin(wrapAngle(aim - angleTo))) * dist;
+      if (perp > weapon.spread) continue;
+      if (dist < bestDist) { bestDist = dist; best = q; }
+    }
+    if (!best) return;
+    best.hp -= weapon.damage;
+    if (best.hp <= 0) this.killPlayer(p, best);
+  }
+
+  killPlayer(killer: Player, victim: Player): void {
+    victim.hp = 0;
+    victim.dead = true;
+    victim.respawnTick = this.tick + 80; // 4 s at 20 Hz
+    victim.deaths++;
+    killer.kills++;
+    if (victim.vehicleId) {
+      const v = this.vehicles.get(victim.vehicleId);
+      if (v) v.driverId = null;
+      victim.vehicleId = null;
+    }
+    const buf = encodeKillEvent(killer.id, victim.id);
+    for (const rp of this.players.values()) {
+      if (rp.ws) rp.ws.send(buf, true);
     }
   }
 

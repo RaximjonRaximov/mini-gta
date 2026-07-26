@@ -1,6 +1,6 @@
 # Mikro GTA
 
-Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 3 adds traffic and drivable vehicles to the netcode/city skeleton.
+Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 4 adds basic combat (pistol hitscan, HP, respawn, kill feed) on top of the vehicle/city skeleton.
 
 ## Quick start
 
@@ -27,7 +27,7 @@ Acceptance (local, 100 bots):
 
 - `WASD` / arrows — move / drive
 - `Shift` — sprint
-- `Mouse` — aim
+- `Mouse` — aim / left click to shoot
 - `Space` — enter/exit vehicle
 - `E` — interact
 

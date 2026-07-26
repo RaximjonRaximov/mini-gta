@@ -70,6 +70,24 @@ export function vehicleColor(index: number): number {
   return VEHICLE_COLORS[index % VEHICLE_COLORS.length];
 }
 
+export interface Weapon {
+  name: string;
+  damage: number;
+  fireRateTicks: number; // at 20 Hz
+  range: number;
+  spread: number; // perpendicular half-width at range, px
+}
+
+export const WEAPONS: Record<string, Weapon> = {
+  pistol: { name: 'pistol', damage: 25, fireRateTicks: 8, range: 900, spread: 24 },
+};
+
+export function wrapAngle(a: number): number {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
 export interface SnapshotHeader {
   tick: number;
   ackSeq: number;
@@ -270,6 +288,21 @@ export function encodeVehicleEvent(vehicleId: number): ArrayBuffer {
 
 export function decodeVehicleEvent(buf: ArrayBuffer): number {
   return new DataView(buf).getUint16(2, true);
+}
+
+export function encodeKillEvent(killerId: number, victimId: number): ArrayBuffer {
+  const buf = new ArrayBuffer(6);
+  const v = new DataView(buf);
+  v.setUint8(0, Op.Event);
+  v.setUint8(1, 0x03);
+  v.setUint16(2, killerId, true);
+  v.setUint16(4, victimId, true);
+  return buf;
+}
+
+export function decodeKillEvent(buf: ArrayBuffer): { killerId: number; victimId: number } {
+  const v = new DataView(buf);
+  return { killerId: v.getUint16(2, true), victimId: v.getUint16(4, true) };
 }
 
 // --- City generation ---

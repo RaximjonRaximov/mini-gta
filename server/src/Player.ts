@@ -28,6 +28,12 @@ export class Player {
   money = 0;
   vehicleId: number | null = null;
   lastEnterExit = false;
+  weapon = 'pistol';
+  lastFireTick = -999;
+  dead = false;
+  respawnTick = 0;
+  kills = 0;
+  deaths = 0;
 
   lastInput: InputFrame = { seq: 0, keys: 0, actions: 0, angle: 0, time: 0 };
 
@@ -41,6 +47,7 @@ export class Player {
   }
 
   applyInput(dt: number): void {
+    if (this.dead) { this.vx = 0; this.vy = 0; return; }
     const keys = this.lastInput.keys;
     const speed = (keys & InputKey.Sprint) ? 450 : 250; // px/s
     let ax = 0;
