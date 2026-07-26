@@ -1,5 +1,5 @@
 import { App, DISABLED, type HttpResponse, type HttpRequest } from 'uWebSockets.js';
-import { decodeInput, encodeSeed, Op, type CreateRoomRequest, type JoinRoomRequest, type RoomInfo } from '@mini-gta/shared';
+import { decodeInput, encodeSeed, InputKey, Op, type CreateRoomRequest, type JoinRoomRequest, type RoomInfo } from '@mini-gta/shared';
 import { Room } from './Room.js';
 import type { UserData } from './types.js';
 
@@ -138,13 +138,17 @@ app.ws<UserData>('/ws', {
   message: (ws, message) => {
     const data = ws.getUserData();
     const room = rooms.get(data.roomId);
-    const p = room?.players.get(data.playerId ?? -1);
+    if (!room) return;
+    const p = room.players.get(data.playerId ?? -1);
     if (!p) return;
     const arr = new Uint8Array(message);
     if (arr.length < 1) return;
     const op = arr[0];
     if (op === Op.Input && arr.length >= 8) {
       const { seq, keys, actions, angle } = decodeInput(arr.buffer.slice(arr.byteOffset, arr.byteOffset + 8));
+      const enterExit = !!(keys & InputKey.EnterExit);
+      if (enterExit && !p.lastEnterExit) room.tryEnterExit(p);
+      p.lastEnterExit = enterExit;
       p.lastInput = { seq, keys, actions, angle, time: Date.now() };
       p.lastSeq = Math.max(p.lastSeq, seq);
     } else if (op === Op.Ping) {
@@ -179,7 +183,7 @@ const tickHistory: number[] = [];
 
 // Simulation loop
 function tickAll(): void {
-  const t0 = process.hrtime.bigint();
+  const c0 = process.cpuUsage();
   let updateNs = BigInt(0);
   let snapshotNs = BigInt(0);
   for (const room of rooms.values()) {
@@ -191,10 +195,10 @@ function tickAll(): void {
     updateNs += u1 - u0;
     snapshotNs += u2 - u1;
   }
-  const t1 = process.hrtime.bigint();
-  lastTickMs = Number(t1 - t0) / 1_000_000;
+  const c1 = process.cpuUsage();
   lastUpdateMs = Number(updateNs) / 1_000_000;
   lastSnapshotMs = Number(snapshotNs) / 1_000_000;
+  lastTickMs = (c1.user - c0.user + c1.system - c0.system) / 1000;
   tickHistory.push(lastTickMs);
   if (tickHistory.length > TICK_HISTORY) tickHistory.shift();
 }

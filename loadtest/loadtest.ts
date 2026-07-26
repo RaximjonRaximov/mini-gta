@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { encodeInput, Op, InputKey, decodeSnapshot } from '@mini-gta/shared';
+import { encodeInput, Op, InputKey } from '@mini-gta/shared';
 
 const SERVER = process.env.SERVER || 'ws://localhost:3001';
 const HTTP = SERVER.replace(/^ws/, 'http');
@@ -48,11 +48,12 @@ function connectBot(roomId: string, name: string): Promise<Bot> {
       bot.bytesIn += data.byteLength;
       const op = new Uint8Array(data)[0];
       if (op === Op.Snapshot) {
-        const snap = decodeSnapshot(data);
-        const sent = bot.acks.get(snap.ackSeq);
+        // ackSeq is at byte offset 5 (op=1, tick=4)
+        const ackSeq = new DataView(data).getUint16(5, true);
+        const sent = bot.acks.get(ackSeq);
         if (sent) {
           bot.latencies.push(Date.now() - sent);
-          bot.acks.delete(snap.ackSeq);
+          bot.acks.delete(ackSeq);
         }
       }
     });

@@ -26,6 +26,7 @@ export enum InputKey {
   Sprint = 0x10,
   Fire = 0x20,
   Interact = 0x40,
+  EnterExit = 0x80,
 }
 
 export const enum ChangedField {
@@ -57,8 +58,16 @@ export const PLAYER_COLORS = [
   0xf97316, 0xec4899, 0x14b8a6, 0x6366f1, 0x84cc16,
 ];
 
+export const VEHICLE_COLORS = [
+  0xef4444, 0x3b82f6, 0xeab308, 0xa855f7, 0x14b8a6,
+];
+
 export function playerColor(index: number): number {
   return PLAYER_COLORS[index % PLAYER_COLORS.length];
+}
+
+export function vehicleColor(index: number): number {
+  return VEHICLE_COLORS[index % VEHICLE_COLORS.length];
 }
 
 export interface SnapshotHeader {
@@ -152,10 +161,10 @@ function entitySize(changed: number): number {
   return n;
 }
 
-export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
+export function encodeSnapshot(snap: Snapshot, outBuf?: ArrayBuffer): ArrayBuffer | Uint8Array {
   let size = 9;
   for (const e of snap.entities) size += entitySize(e.changed);
-  const buf = new ArrayBuffer(size);
+  const buf = outBuf && outBuf.byteLength >= size ? outBuf : new ArrayBuffer(size);
   const v = new DataView(buf);
   let off = 0;
   v.setUint8(off++, Op.Snapshot);
@@ -171,11 +180,12 @@ export function encodeSnapshot(snap: Snapshot): ArrayBuffer {
     if (e.changed & ChangedField.Y) { v.setUint16(off, Math.max(0, Math.min(65535, Math.round(e.y! * POS_SCALE))), true); off += 2; }
     if (e.changed & ChangedField.Angle) { v.setUint8(off++, Math.max(0, Math.min(255, Math.round(e.angle! / (Math.PI * 2) * 255)))); }
     if (e.changed & ChangedField.Hp) { v.setUint8(off++, Math.max(0, Math.min(255, e.hp!))); }
-    if (e.changed & ChangedField.Vel) {
+    if (ChangedField.Vel & e.changed) {
       v.setInt16(off, Math.max(-32767, Math.min(32767, Math.round(e.vx! * 64))), true); off += 2;
       v.setInt16(off, Math.max(-32767, Math.min(32767, Math.round(e.vy! * 64))), true); off += 2;
     }
   }
+  if (outBuf) return new Uint8Array(buf, 0, off);
   return buf;
 }
 
@@ -246,6 +256,20 @@ export function encodeSeed(seed: string): ArrayBuffer {
 
 export function decodeSeed(buf: ArrayBuffer): string {
   return new TextDecoder().decode(new Uint8Array(buf, 2));
+}
+
+// --- Vehicle enter/exit event helpers ---
+export function encodeVehicleEvent(vehicleId: number): ArrayBuffer {
+  const buf = new ArrayBuffer(4);
+  const v = new DataView(buf);
+  v.setUint8(0, Op.Event);
+  v.setUint8(1, 0x02); // vehicle sub-op
+  v.setUint16(2, vehicleId, true);
+  return buf;
+}
+
+export function decodeVehicleEvent(buf: ArrayBuffer): number {
+  return new DataView(buf).getUint16(2, true);
 }
 
 // --- City generation ---

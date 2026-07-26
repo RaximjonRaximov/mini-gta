@@ -1,4 +1,4 @@
-import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, generateCity, InputKey, Op, WORLD_SIZE, playerColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
+import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, decodeVehicleEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -75,6 +75,7 @@ let lastSnapshotTime = performance.now();
 let lastRender = performance.now();
 let fps = 0;
 let city: City | null = null;
+let localVehicleId = 0;
 
 function buildInputPacket(): ArrayBuffer {
   let k = 0;
@@ -83,7 +84,7 @@ function buildInputPacket(): ArrayBuffer {
   if (keys['KeyA'] || keys['ArrowLeft']) k |= InputKey.Left;
   if (keys['KeyD'] || keys['ArrowRight']) k |= InputKey.Right;
   if (keys['ShiftLeft'] || keys['ShiftRight']) k |= InputKey.Sprint;
-  if (keys['Space']) k |= InputKey.Fire;
+  if (keys['Space']) k |= InputKey.EnterExit;
   if (keys['KeyE']) k |= InputKey.Interact;
   const angle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
   inputSeq = (inputSeq + 1) % 65536;
@@ -91,6 +92,27 @@ function buildInputPacket(): ArrayBuffer {
 }
 
 function applyLocalInput(dt: number, keys: number, angle: number): void {
+  if (localVehicleId) {
+    // arcade car physics prediction
+    let throttle = 0, steer = 0;
+    if (keys & InputKey.Up) throttle += 1;
+    if (keys & InputKey.Down) throttle -= 1;
+    if (keys & InputKey.Left) steer -= 1;
+    if (keys & InputKey.Right) steer += 1;
+    const speed = Math.hypot(localState.vx, localState.vy);
+    if (speed < 500) {
+      localState.vx += Math.cos(localState.angle) * 700 * throttle * dt;
+      localState.vy += Math.sin(localState.angle) * 700 * throttle * dt;
+    }
+    if (speed > 10) localState.angle += steer * 1.6 * (speed / 500) * dt;
+    localState.vx *= 0.95;
+    localState.vy *= 0.95;
+    localState.x += localState.vx * dt;
+    localState.y += localState.vy * dt;
+    localState.x = Math.max(16, Math.min(WORLD_SIZE - 16, localState.x));
+    localState.y = Math.max(16, Math.min(WORLD_SIZE - 16, localState.y));
+    return;
+  }
   const speed = (keys & InputKey.Sprint) ? 450 : 250;
   let ax = 0, ay = 0;
   if (keys & InputKey.Up) ay -= 1;
@@ -148,7 +170,9 @@ function onSnapshot(buf: ArrayBuffer): void {
   lastSnapshotTime = performance.now();
 
   let foundLocal = false;
+  let playerCount = 0;
   for (const e of snap.entities) {
+    if (e.color < 100) playerCount++;
     if (e.id === localPlayerId) {
       foundLocal = true;
       serverState.x = e.x ?? serverState.x;
@@ -175,7 +199,8 @@ function onSnapshot(buf: ArrayBuffer): void {
     }
   }
   if (foundLocal) reconcile();
-  playersEl.textContent = `Players: ${snap.entities.length}`;
+  if (foundLocal) playerCount++;
+  playersEl.textContent = `Players: ${playerCount}`;
 }
 
 function connect(wsUrl: string, name: string, roomId: string): void {
@@ -207,6 +232,8 @@ function connect(wsUrl: string, name: string, roomId: string): void {
         if (sub === 0x01) {
           const seed = decodeSeed(ev.data);
           city = generateCity(seed);
+        } else if (sub === 0x02) {
+          localVehicleId = decodeVehicleEvent(ev.data);
         }
       }
     }
@@ -302,6 +329,24 @@ function drawWorld(camX: number, camY: number): void {
   ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
 }
 
+function drawVehicleBody(cx: number, cy: number, angle: number, color: number, scale = 1): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.fillStyle = '#' + vehicleColor(color).toString(16).padStart(6, '0');
+  ctx.fillRect(-18 * scale, -10 * scale, 36 * scale, 20 * scale);
+  ctx.fillStyle = '#1f2937';
+  ctx.fillRect(-10 * scale, -8 * scale, 14 * scale, 16 * scale);
+  ctx.restore();
+}
+
+function drawPlayerBody(cx: number, cy: number, angle: number, color: number): void {
+  ctx.fillStyle = '#' + playerColor(color).toString(16).padStart(6, '0');
+  ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(angle) * 18, cy + Math.sin(angle) * 18); ctx.stroke();
+}
+
 function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
   // interpolate from prev to current
   const t = Math.min(1, Math.max(0, (now - e.lastUpdated + interpMs) / interpMs));
@@ -309,15 +354,21 @@ function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
   const y = e.prevY + (e.y - e.prevY) * t;
   const cx = x - (localState.x - canvas.width / 2);
   const cy = y - (localState.y - canvas.height / 2);
-  ctx.fillStyle = '#' + (playerColor(e.color ?? 0)).toString(16).padStart(6, '0');
-  ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(e.angle) * 18, cy + Math.sin(e.angle) * 18); ctx.stroke();
+  if (e.id === localVehicleId) return;
+  if (e.color >= 100) {
+    drawVehicleBody(cx, cy, e.angle, e.color - 100);
+  } else {
+    drawPlayerBody(cx, cy, e.angle, e.color);
+  }
 }
 
 function drawLocalPlayer(): void {
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
+  if (localVehicleId) {
+    drawVehicleBody(cx, cy, localState.angle, localVehicleId % 5, 1.2);
+    return;
+  }
   // white outline so the local player is always visible on any background
   ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(cx, cy, 15, 0, Math.PI * 2); ctx.stroke();

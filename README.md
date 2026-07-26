@@ -1,6 +1,6 @@
 # Mikro GTA
 
-Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 1 delivers the netcode skeleton.
+Browser-only top-down 2D multiplayer comedy GTA (GTA 1/2 style). Phase 3 adds traffic and drivable vehicles to the netcode/city skeleton.
 
 ## Quick start
 
@@ -25,10 +25,10 @@ Acceptance (local, 100 bots):
 
 ## Controls
 
-- `WASD` / arrows — move
+- `WASD` / arrows — move / drive
 - `Shift` — sprint
 - `Mouse` — aim
-- `Space` — fire
+- `Space` — enter/exit vehicle
 - `E` — interact
 
 ## Architecture
@@ -39,4 +39,5 @@ Acceptance (local, 100 bots):
 - Binary `ArrayBuffer` protocol with quantized positions/angles/velocities
 - Server-authoritative, client prediction + server reconciliation + remote interpolation
 - 20 Hz server tick, 20 Hz snapshots, 30 Hz input, 60 Hz render
-- Spatial interest management (≈1500 px radius)
+- Spatial interest management (≈1000 px radius)
+- Seeded deterministic 8192×8192 city; server only sends the seed

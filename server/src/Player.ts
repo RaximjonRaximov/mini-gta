@@ -17,6 +17,7 @@ export class Player {
   roomId: string;
   ws: WebSocket<UserData> | null = null;
   lastSeq = 0;
+  sendBuf = new ArrayBuffer(2048);
 
   x: number;
   y: number;
@@ -25,6 +26,8 @@ export class Player {
   angle = 0;
   hp = 100;
   money = 0;
+  vehicleId: number | null = null;
+  lastEnterExit = false;
 
   lastInput: InputFrame = { seq: 0, keys: 0, actions: 0, angle: 0, time: 0 };
 
