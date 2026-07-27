@@ -443,7 +443,7 @@ function onSnapshot(buf: ArrayBuffer): void {
       serverState.hp = e.hp ?? serverState.hp;
       continue;
     }
-    if (e.color < 100) playerCount++;
+    if ((e.color ?? 0) < 100) playerCount++;
     const now = performance.now();
     const ex = entities.get(e.id);
     if (ex) {
