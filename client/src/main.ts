@@ -178,23 +178,32 @@ function buildCity(city: City): void {
   ground.receiveShadow = true;
   cityGroup.add(ground);
 
+  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+  const matrix = new THREE.Matrix4();
+
   const roadMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
-  for (const r of city.roads) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(r.w, 1, r.h), roadMat);
-    m.position.set(r.x + r.w / 2, 0.5, r.y + r.h / 2);
-    m.receiveShadow = true;
-    cityGroup.add(m);
+  const roads = new THREE.InstancedMesh(boxGeo, roadMat, city.roads.length);
+  roads.receiveShadow = true;
+  for (let i = 0; i < city.roads.length; i++) {
+    const r = city.roads[i];
+    matrix.makeTranslation(r.x + r.w / 2, 0.5, r.y + r.h / 2).scale(new THREE.Vector3(r.w, 1, r.h));
+    roads.setMatrixAt(i, matrix);
   }
+  roads.instanceMatrix.needsUpdate = true;
+  cityGroup.add(roads);
 
   const buildingMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
-  for (const b of city.buildings) {
+  const buildings = new THREE.InstancedMesh(boxGeo, buildingMat, city.buildings.length);
+  buildings.castShadow = true;
+  buildings.receiveShadow = true;
+  for (let i = 0; i < city.buildings.length; i++) {
+    const b = city.buildings[i];
     const h = b.height ?? 60;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(b.w, h, b.h), buildingMat);
-    m.position.set(b.x + b.w / 2, h / 2, b.y + b.h / 2);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    cityGroup.add(m);
+    matrix.makeTranslation(b.x + b.w / 2, h / 2, b.y + b.h / 2).scale(new THREE.Vector3(b.w, h, b.h));
+    buildings.setMatrixAt(i, matrix);
   }
+  buildings.instanceMatrix.needsUpdate = true;
+  cityGroup.add(buildings);
 
   scene.add(cityGroup);
 }
@@ -212,11 +221,10 @@ sharedGeometries.wheel.rotateZ(Math.PI / 2);
 
 function createPlayerMesh(color: number): THREE.Group {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(sharedGeometries.capsule, new THREE.MeshStandardMaterial({ color }));
+  const body = new THREE.Mesh(sharedGeometries.capsule, new THREE.MeshLambertMaterial({ color }));
   body.position.y = 17;
-  body.castShadow = true;
   body.receiveShadow = true;
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 18), new THREE.MeshStandardMaterial({ color: 0x111827 }));
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 18), new THREE.MeshLambertMaterial({ color: 0x111827 }));
   barrel.position.set(0, 18, 10);
   g.add(body, barrel);
   return g;
@@ -224,18 +232,17 @@ function createPlayerMesh(color: number): THREE.Group {
 
 function createVehicleMesh(color: number): THREE.Group {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(sharedGeometries.vehicle, new THREE.MeshStandardMaterial({ color }));
+  const body = new THREE.Mesh(sharedGeometries.vehicle, new THREE.MeshLambertMaterial({ color }));
   body.name = 'body';
   body.position.y = 10;
-  body.castShadow = true;
   body.receiveShadow = true;
   g.add(body);
-  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
+  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111827 });
   const positions = [[-12, 3, -8], [12, 3, -8], [-12, 3, 8], [12, 3, 8]];
   for (const [wx, wy, wz] of positions) {
     const w = new THREE.Mesh(sharedGeometries.wheel, wheelMat);
     w.position.set(wx, wy, wz);
-    w.castShadow = true;
+    w.receiveShadow = true;
     g.add(w);
   }
   return g;
@@ -244,20 +251,20 @@ function createVehicleMesh(color: number): THREE.Group {
 function createNpcMesh(type: number): THREE.Group {
   const g = new THREE.Group();
   if (type === 0) {
-    const body = new THREE.Mesh(sharedGeometries.sphere, new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+    const body = new THREE.Mesh(sharedGeometries.sphere, new THREE.MeshLambertMaterial({ color: 0xfacc15 }));
     body.position.y = 4;
-    body.castShadow = true;
+    body.receiveShadow = true;
     g.add(body);
   } else if (type === 1) {
-    const body = new THREE.Mesh(sharedGeometries.smallCapsule, new THREE.MeshStandardMaterial({ color: 0x3b82f6 }));
+    const body = new THREE.Mesh(sharedGeometries.smallCapsule, new THREE.MeshLambertMaterial({ color: 0x3b82f6 }));
     body.position.y = 11;
-    body.castShadow = true;
+    body.receiveShadow = true;
     g.add(body);
   } else {
-    const body = new THREE.Mesh(sharedGeometries.policeCapsule, new THREE.MeshStandardMaterial({ color: 0x1f2937 }));
+    const body = new THREE.Mesh(sharedGeometries.policeCapsule, new THREE.MeshLambertMaterial({ color: 0x1f2937 }));
     body.position.y = 18;
-    body.castShadow = true;
-    const cone = new THREE.Mesh(sharedGeometries.cone, new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+    body.receiveShadow = true;
+    const cone = new THREE.Mesh(sharedGeometries.cone, new THREE.MeshLambertMaterial({ color: 0xef4444 }));
     cone.position.y = 34;
     g.add(body, cone);
   }
@@ -639,7 +646,9 @@ function updateCamera(): void {
   const desired = target.clone().addScaledVector(forward, -dist).add(new THREE.Vector3(0, height, 0));
   camera.position.lerp(desired, 0.1);
   camera.lookAt(target);
-  sun.position.set(camera.position.x + 500, camera.position.y + 1000, camera.position.z + 500);
+  sun.position.copy(target).add(new THREE.Vector3(2000, 2500, 1000));
+  sun.target.position.copy(target);
+  sun.target.updateMatrixWorld();
 }
 
 // --- main loop ---
