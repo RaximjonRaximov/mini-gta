@@ -1,9 +1,9 @@
-import { decodeSnapshot, decodeInput, encodeInput, decodeSeed, decodeVehicleEvent, decodeKillEvent, decodeWantedEvent, decodeMoneyEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest, type Rect } from '@mini-gta/shared';
+import * as THREE from 'three';
+import { decodeSnapshot, encodeInput, decodeSeed, decodeVehicleEvent, decodeKillEvent, decodeWantedEvent, decodeMoneyEvent, generateCity, InputKey, Op, WORLD_SIZE, playerColor, vehicleColor, type EntityDelta, type Snapshot, type City, type RoomInfo, type CreateRoomRequest, type JoinRoomRequest } from '@mini-gta/shared';
 import { playShoot, playExplosion, setMuted, isMuted } from './audio.js';
 import { t, setLang, getLang, type Lang } from './i18n.js';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
-const ctx = canvas.getContext('2d')!;
 
 const lobby = document.getElementById('lobby') as HTMLDivElement;
 const hud = document.getElementById('hud') as HTMLDivElement;
@@ -39,7 +39,6 @@ const touchEnter = document.getElementById('touch-enter') as HTMLDivElement;
 const keys: Record<string, boolean> = {};
 let mouseX = 0;
 let mouseY = 0;
-let canvasRect = { left: 0, top: 0 };
 let firing = false;
 let wasFiring = false;
 
@@ -66,7 +65,6 @@ langBtn.addEventListener('click', () => {
 });
 
 let joyTouchId: number | null = null;
-const joyCenter = { x: 0, y: 0 };
 function updateJoystick(touch: Touch): void {
   const rect = joystick.getBoundingClientRect();
   const cx = rect.left + rect.width / 2;
@@ -109,13 +107,13 @@ touchEnter.addEventListener('touchcancel', (e) => { e.preventDefault(); keys['Sp
 window.addEventListener('touchstart', (e) => {
   for (const t of e.changedTouches) {
     if (t.target === touchFire || t.target === touchEnter || t.target === joystick || t.target === joystickKnob) continue;
-    mouseX = t.clientX - canvasRect.left; mouseY = t.clientY - canvasRect.top;
+    mouseX = t.clientX; mouseY = t.clientY;
   }
 }, { passive: true });
 window.addEventListener('touchmove', (e) => {
   for (const t of e.changedTouches) {
     if (t.target === touchFire || t.target === touchEnter || t.target === joystick || t.target === joystickKnob) continue;
-    mouseX = t.clientX - canvasRect.left; mouseY = t.clientY - canvasRect.top;
+    mouseX = t.clientX; mouseY = t.clientY;
   }
 }, { passive: true });
 
@@ -123,18 +121,154 @@ window.addEventListener('keydown', (e) => { keys[e.code] = true; });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 window.addEventListener('mousedown', () => { firing = true; });
 window.addEventListener('mouseup', () => { firing = false; });
-window.addEventListener('mousemove', (e) => {
-  mouseX = e.clientX - canvasRect.left;
-  mouseY = e.clientY - canvasRect.top;
-});
-window.addEventListener('resize', resize);
+window.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
 
 function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  canvasRect = canvas.getBoundingClientRect();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (camera) camera.aspect = window.innerWidth / window.innerHeight;
+  if (camera) camera.updateProjectionMatrix();
 }
+
+// --- Three.js scene ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f19);
+scene.fog = new THREE.Fog(0x0b0f19, 1200, 5000);
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 20000);
+camera.position.set(0, 300, -300);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+window.addEventListener('resize', resize);
 resize();
+
+const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(2000, 2500, 1000);
+sun.castShadow = true;
+sun.shadow.mapSize.width = 2048;
+sun.shadow.mapSize.height = 2048;
+sun.shadow.camera.left = -600;
+sun.shadow.camera.right = 600;
+sun.shadow.camera.top = 600;
+sun.shadow.camera.bottom = -600;
+sun.shadow.camera.far = 4000;
+scene.add(sun);
+
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+let cityGroup: THREE.Group | null = null;
+
+function buildCity(city: City): void {
+  if (cityGroup) { scene.remove(cityGroup); cityGroup = null; }
+  cityGroup = new THREE.Group();
+  const half = city.worldSize / 2;
+
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(city.worldSize, city.worldSize),
+    new THREE.MeshLambertMaterial({ color: 0x0f172a }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(half, 0, half);
+  ground.receiveShadow = true;
+  cityGroup.add(ground);
+
+  const roadMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
+  for (const r of city.roads) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(r.w, 1, r.h), roadMat);
+    m.position.set(r.x + r.w / 2, 0.5, r.y + r.h / 2);
+    m.receiveShadow = true;
+    cityGroup.add(m);
+  }
+
+  const buildingMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+  for (const b of city.buildings) {
+    const h = b.height ?? 60;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(b.w, h, b.h), buildingMat);
+    m.position.set(b.x + b.w / 2, h / 2, b.y + b.h / 2);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    cityGroup.add(m);
+  }
+
+  scene.add(cityGroup);
+}
+
+const sharedGeometries = {
+  capsule: new THREE.CapsuleGeometry(7, 20, 4, 8),
+  smallCapsule: new THREE.CapsuleGeometry(5, 12, 4, 8),
+  policeCapsule: new THREE.CapsuleGeometry(7, 22, 4, 8),
+  sphere: new THREE.SphereGeometry(4, 8, 8),
+  vehicle: new THREE.BoxGeometry(36, 14, 20),
+  wheel: new THREE.CylinderGeometry(3, 3, 2, 12),
+  cone: new THREE.ConeGeometry(6, 14, 8),
+};
+sharedGeometries.wheel.rotateZ(Math.PI / 2);
+
+function createPlayerMesh(color: number): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(sharedGeometries.capsule, new THREE.MeshStandardMaterial({ color }));
+  body.position.y = 17;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 18), new THREE.MeshStandardMaterial({ color: 0x111827 }));
+  barrel.position.set(0, 18, 10);
+  g.add(body, barrel);
+  return g;
+}
+
+function createVehicleMesh(color: number): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(sharedGeometries.vehicle, new THREE.MeshStandardMaterial({ color }));
+  body.name = 'body';
+  body.position.y = 10;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  g.add(body);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111827 });
+  const positions = [[-12, 3, -8], [12, 3, -8], [-12, 3, 8], [12, 3, 8]];
+  for (const [wx, wy, wz] of positions) {
+    const w = new THREE.Mesh(sharedGeometries.wheel, wheelMat);
+    w.position.set(wx, wy, wz);
+    w.castShadow = true;
+    g.add(w);
+  }
+  return g;
+}
+
+function createNpcMesh(type: number): THREE.Group {
+  const g = new THREE.Group();
+  if (type === 0) {
+    const body = new THREE.Mesh(sharedGeometries.sphere, new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+    body.position.y = 4;
+    body.castShadow = true;
+    g.add(body);
+  } else if (type === 1) {
+    const body = new THREE.Mesh(sharedGeometries.smallCapsule, new THREE.MeshStandardMaterial({ color: 0x3b82f6 }));
+    body.position.y = 11;
+    body.castShadow = true;
+    g.add(body);
+  } else {
+    const body = new THREE.Mesh(sharedGeometries.policeCapsule, new THREE.MeshStandardMaterial({ color: 0x1f2937 }));
+    body.position.y = 18;
+    body.castShadow = true;
+    const cone = new THREE.Mesh(sharedGeometries.cone, new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+    cone.position.y = 34;
+    g.add(body, cone);
+  }
+  return g;
+}
+
+const localPlayerMesh = createPlayerMesh(0x22c55e);
+const localVehicleMesh = createVehicleMesh(0xef4444);
+localPlayerMesh.visible = false;
+localVehicleMesh.visible = false;
+scene.add(localPlayerMesh, localVehicleMesh);
 
 // --- netcode state ---
 let ws: WebSocket | null = null;
@@ -154,6 +288,7 @@ interface RemoteEntity {
   prevX: number;
   prevY: number;
   prevTime: number;
+  mesh?: THREE.Object3D;
 }
 
 const entities = new Map<number, RemoteEntity>();
@@ -194,6 +329,15 @@ function addKillFeed(killerId: number, victimId: string | number): void {
   setTimeout(() => { if (killFeedEl.contains(row)) killFeedEl.removeChild(row); }, 5000);
 }
 
+function currentAimAngle(): number {
+  mouse.x = (mouseX / window.innerWidth) * 2 - 1;
+  mouse.y = -(mouseY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const target = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(groundPlane, target)) return localState.angle;
+  return Math.atan2(target.z - localState.y, target.x - localState.x);
+}
+
 function buildInputPacket(): ArrayBuffer {
   let k = 0;
   if (keys['KeyW'] || keys['ArrowUp']) k |= InputKey.Up;
@@ -206,7 +350,7 @@ function buildInputPacket(): ArrayBuffer {
   if (keys['KeyE']) k |= InputKey.Interact;
   if (firing && !wasFiring) playShoot();
   wasFiring = firing;
-  const angle = Math.atan2(mouseY - canvas.height / 2, mouseX - canvas.width / 2);
+  const angle = currentAimAngle();
   inputSeq = (inputSeq + 1) % 65536;
   return encodeInput(inputSeq, k, 0, angle);
 }
@@ -214,7 +358,6 @@ function buildInputPacket(): ArrayBuffer {
 function applyLocalInput(dt: number, keys: number, angle: number): void {
   if (localState.hp <= 0) return;
   if (localVehicleId) {
-    // arcade car physics prediction
     let throttle = 0, steer = 0;
     if (keys & InputKey.Up) throttle += 1;
     if (keys & InputKey.Down) throttle -= 1;
@@ -256,10 +399,8 @@ function applyLocalInput(dt: number, keys: number, angle: number): void {
 }
 
 function reconcile(): void {
-  // simplest reconciliation: find last processed input by ack and replay
   const idx = pendingInputs.findIndex(i => i.seq === receivedAck);
   if (idx < 0) {
-    // no ack; snap gently to server state
     localState.x += (serverState.x - localState.x) * 0.1;
     localState.y += (serverState.y - localState.y) * 0.1;
     return;
@@ -277,7 +418,6 @@ function reconcile(): void {
     pendingInputs.splice(0, idx + 1);
     return;
   }
-  // prediction error small: keep predicted state but adjust
   localState.x += dx;
   localState.y += dy;
   localState.vx += dvx;
@@ -315,7 +455,7 @@ function onSnapshot(buf: ArrayBuffer): void {
       entities.set(e.id, {
         id: e.id, x: e.x ?? 0, y: e.y ?? 0, angle: e.angle ?? 0,
         hp: e.hp ?? 100, color: e.color ?? 0x22c55e,
-        lastUpdated: now, prevX: e.x ?? 0, prevY: e.y ?? 0, prevTime: now
+        lastUpdated: now, prevX: e.x ?? 0, prevY: e.y ?? 0, prevTime: now,
       });
     }
   }
@@ -345,7 +485,6 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     setWanted(0);
     setMoney(0);
     killFeedEl.innerHTML = '';
-    // identify as local; server will not send local id explicitly in v1, we infer by matching snapshot ack
     lastPingSent = performance.now();
     const ping = new ArrayBuffer(1); new Uint8Array(ping)[0] = Op.Ping; ws!.send(ping);
   };
@@ -360,13 +499,19 @@ function connect(wsUrl: string, name: string, roomId: string): void {
       } else if (op === Op.AssignId) {
         localPlayerId = v.getUint16(1, true);
         entities.delete(localPlayerId);
+        localPlayerMesh.visible = true;
       } else if (op === Op.Event) {
         const sub = v.getUint8(1);
         if (sub === 0x01) {
           const seed = decodeSeed(ev.data);
           city = generateCity(seed);
+          buildCity(city);
         } else if (sub === 0x02) {
           localVehicleId = decodeVehicleEvent(ev.data);
+          const body = localVehicleMesh.getObjectByName('body') as THREE.Mesh | undefined;
+          if (body && body.material) (body.material as THREE.MeshStandardMaterial).color.setHex(vehicleColor(localVehicleId % 5));
+          localVehicleMesh.visible = localVehicleId !== 0;
+          localPlayerMesh.visible = localVehicleId === 0;
         } else if (sub === 0x03) {
           const { killerId, victimId } = decodeKillEvent(ev.data);
           addKillFeed(killerId, victimId);
@@ -388,6 +533,12 @@ function connect(wsUrl: string, name: string, roomId: string): void {
     killFeedEl.innerHTML = '';
     setWanted(0);
     setMoney(0);
+    localPlayerMesh.visible = false;
+    localVehicleMesh.visible = false;
+    localVehicleId = 0;
+    if (cityGroup) { scene.remove(cityGroup); cityGroup = null; }
+    for (const ex of entities.values()) if (ex.mesh) scene.remove(ex.mesh);
+    entities.clear();
     lobby.classList.remove('hidden');
   };
 }
@@ -440,119 +591,55 @@ async function loadRooms() {
   }
 }
 
-// --- rendering ---
-function onScreen(r: Rect, camX: number, camY: number): boolean {
-  return r.x < camX + canvas.width && r.x + r.w > camX && r.y < camY + canvas.height && r.y + r.h > camY;
+// --- 3D scene updates ---
+function entityYOffset(color: number): number {
+  if (color >= 200) return 11;
+  if (color >= 100) return 10;
+  return 17;
 }
 
-function drawWorld(camX: number, camY: number): void {
-  ctx.fillStyle = '#0b0f19';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (city) {
-    ctx.fillStyle = '#1f2937';
-    for (const r of city.roads) {
-      if (onScreen(r, camX, camY)) ctx.fillRect(r.x - camX, r.y - camY, r.w, r.h);
-    }
-    ctx.fillStyle = '#374151';
-    for (const b of city.buildings) {
-      if (onScreen(b, camX, camY)) ctx.fillRect(b.x - camX, b.y - camY, b.w, b.h);
-    }
+function ensureEntityMesh(e: RemoteEntity): void {
+  if (e.mesh) return;
+  if (e.color >= 200) {
+    e.mesh = createNpcMesh(e.color - 200);
+  } else if (e.color >= 100) {
+    e.mesh = createVehicleMesh(vehicleColor(e.color - 100));
   } else {
-    ctx.strokeStyle = '#1f2937';
-    ctx.lineWidth = 2;
-    const grid = 512;
-    const startX = Math.floor(camX / grid) * grid - camX;
-    const startY = Math.floor(camY / grid) * grid - camY;
-    for (let x = startX; x < canvas.width; x += grid) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-    }
-    for (let y = startY; y < canvas.height; y += grid) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-    }
+    e.mesh = createPlayerMesh(playerColor(e.color));
   }
-  // bounds
-  ctx.strokeStyle = '#ef4444';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(-camX, -camY, WORLD_SIZE, WORLD_SIZE);
+  e.mesh.visible = true;
+  scene.add(e.mesh);
 }
 
-function drawVehicleBody(cx: number, cy: number, angle: number, color: number, scale = 1): void {
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(angle);
-  ctx.fillStyle = '#' + vehicleColor(color).toString(16).padStart(6, '0');
-  ctx.fillRect(-18 * scale, -10 * scale, 36 * scale, 20 * scale);
-  ctx.fillStyle = '#1f2937';
-  ctx.fillRect(-10 * scale, -8 * scale, 14 * scale, 16 * scale);
-  ctx.restore();
-}
-
-function drawHealthBar(cx: number, cy: number, hp: number): void {
-  const w = 24;
-  const h = 4;
-  ctx.fillStyle = '#000';
-  ctx.fillRect(cx - w / 2 - 1, cy - 20 - 1, w + 2, h + 2);
-  ctx.fillStyle = hp > 50 ? '#22c55e' : hp > 25 ? '#eab308' : '#ef4444';
-  ctx.fillRect(cx - w / 2, cy - 20, w * Math.max(0, hp) / 100, h);
-}
-
-function drawPlayerBody(cx: number, cy: number, angle: number, color: number, hp: number): void {
-  if (hp <= 0) ctx.fillStyle = '#64748b';
-  else ctx.fillStyle = '#' + playerColor(color).toString(16).padStart(6, '0');
-  ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(angle) * 18, cy + Math.sin(angle) * 18); ctx.stroke();
-  if (hp > 0 && hp < 100) drawHealthBar(cx, cy, hp);
-}
-
-function drawNpc(cx: number, cy: number, type: number, angle: number): void {
-  if (type === 0) {
-    ctx.fillStyle = '#facc15';
-    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(angle) * 8, cy + Math.sin(angle) * 8); ctx.stroke();
-  } else if (type === 1) {
-    ctx.fillStyle = '#3b82f6';
-    ctx.fillRect(cx - 4, cy - 4, 8, 8);
-  } else {
-    ctx.fillStyle = '#ef4444';
-    ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx - 5, cy + 5); ctx.lineTo(cx + 5, cy + 5); ctx.fill();
-  }
-}
-
-function drawEntity(e: RemoteEntity, now: number, interpMs = 100): void {
-  // interpolate from prev to current
+function updateEntityMesh(e: RemoteEntity, now: number, interpMs = 100): void {
+  ensureEntityMesh(e);
   const t = Math.min(1, Math.max(0, (now - e.lastUpdated + interpMs) / interpMs));
   const x = e.prevX + (e.x - e.prevX) * t;
-  const y = e.prevY + (e.y - e.prevY) * t;
-  const cx = x - (localState.x - canvas.width / 2);
-  const cy = y - (localState.y - canvas.height / 2);
-  if (e.id === localVehicleId) return;
-  if (e.color >= 200) {
-    drawNpc(cx, cy, e.color - 200, e.angle);
-  } else if (e.color >= 100) {
-    drawVehicleBody(cx, cy, e.angle, e.color - 100);
+  const z = e.prevY + (e.y - e.prevY) * t;
+  e.mesh!.position.set(x, entityYOffset(e.color), z);
+  e.mesh!.rotation.y = -e.angle + Math.PI / 2;
+  if (e.id === localVehicleId || e.id === localPlayerId) e.mesh!.visible = false;
+}
+
+function updateLocalMesh(): void {
+  if (localVehicleId) {
+    localVehicleMesh.position.set(localState.x, 10, localState.y);
+    localVehicleMesh.rotation.y = -localState.angle + Math.PI / 2;
   } else {
-    drawPlayerBody(cx, cy, e.angle, e.color, e.hp);
+    localPlayerMesh.position.set(localState.x, 17, localState.y);
+    localPlayerMesh.rotation.y = -localState.angle + Math.PI / 2;
   }
 }
 
-function drawLocalPlayer(): void {
-  const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
-  if (localVehicleId) {
-    drawVehicleBody(cx, cy, localState.angle, localVehicleId % 5, 1.2);
-    return;
-  }
-  // white outline so the local player is always visible on any background
-  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(cx, cy, 15, 0, Math.PI * 2); ctx.stroke();
-  if (localState.hp <= 0) ctx.fillStyle = '#64748b';
-  else ctx.fillStyle = '#4ade80';
-  ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(localState.angle) * 24, cy + Math.sin(localState.angle) * 24); ctx.stroke();
-  if (localState.hp > 0 && localState.hp < 100) drawHealthBar(cx, cy, localState.hp);
+function updateCamera(): void {
+  const target = new THREE.Vector3(localState.x, 17, localState.y);
+  const forward = new THREE.Vector3(Math.cos(localState.angle), 0, Math.sin(localState.angle));
+  const dist = localVehicleId ? 420 : 320;
+  const height = localVehicleId ? 260 : 220;
+  const desired = target.clone().addScaledVector(forward, -dist).add(new THREE.Vector3(0, height, 0));
+  camera.position.lerp(desired, 0.1);
+  camera.lookAt(target);
+  sun.position.set(camera.position.x + 500, camera.position.y + 1000, camera.position.z + 500);
 }
 
 // --- main loop ---
@@ -567,9 +654,14 @@ function loop(): void {
   fpsEl.textContent = `FPS: ${fps}`;
 
   if (ws && ws.readyState === WebSocket.OPEN) {
-    // local prediction at render rate
     const packet = buildInputPacket();
-    const { seq, keys: k, angle } = decodeInput(packet);
+    const { seq, keys: k, angle } = (() => {
+      const v = new DataView(packet);
+      const seq = v.getUint16(0, true);
+      const keys = v.getUint8(2);
+      const a = v.getUint16(4, true);
+      return { seq, keys, angle: a / 65535 * Math.PI * 2 };
+    })();
     applyLocalInput(dt, k, angle);
     pendingInputs.push({ seq, keys: k, angle, x: localState.x, y: localState.y, vx: localState.vx, vy: localState.vy });
     if (pendingInputs.length > 30) pendingInputs.shift();
@@ -584,12 +676,11 @@ function loop(): void {
     }
   }
 
-  const camX = localState.x - canvas.width / 2;
-  const camY = localState.y - canvas.height / 2;
-  drawWorld(camX, camY);
-  for (const e of entities.values()) drawEntity(e, now);
-  drawLocalPlayer();
+  updateLocalMesh();
+  for (const e of entities.values()) updateEntityMesh(e, now);
+  if (localState.hp > 0) updateCamera();
 
+  renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

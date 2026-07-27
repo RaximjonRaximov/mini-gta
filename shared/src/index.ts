@@ -337,6 +337,7 @@ export interface Rect {
   y: number;
   w: number;
   h: number;
+  height?: number;
 }
 
 export interface City {
@@ -375,7 +376,8 @@ export function generateCity(seed: string, worldSize = WORLD_SIZE): City {
         const margin = 24;
         const x = cx + margin + rng() * (blockSize - bw - margin * 2);
         const y = cy + margin + rng() * (blockSize - bh - margin * 2);
-        buildings.push({ x, y, w: bw, h: bh });
+        const height = 60 + rng() * 200;
+        buildings.push({ x, y, w: bw, h: bh, height });
       }
     }
   }
