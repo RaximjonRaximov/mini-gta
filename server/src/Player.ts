@@ -51,19 +51,25 @@ export class Player {
     if (this.dead) { this.vx = 0; this.vy = 0; return; }
     const keys = this.lastInput.keys;
     const speed = (keys & InputKey.Sprint) ? 450 : 250; // px/s
-    let ax = 0;
-    let ay = 0;
-    if (keys & InputKey.Up) ay -= 1;
-    if (keys & InputKey.Down) ay += 1;
-    if (keys & InputKey.Left) ax -= 1;
-    if (keys & InputKey.Right) ax += 1;
-    if (ax !== 0 || ay !== 0) {
-      const len = Math.hypot(ax, ay);
-      ax /= len; ay /= len;
-      this.angle = this.lastInput.angle;
+    let nx = 0;
+    let ny = 0;
+    if (keys & InputKey.Up) ny += 1;
+    if (keys & InputKey.Down) ny -= 1;
+    if (keys & InputKey.Left) nx -= 1;
+    if (keys & InputKey.Right) nx += 1;
+    this.angle = this.lastInput.angle;
+    if (nx !== 0 || ny !== 0) {
+      const len = Math.hypot(nx, ny);
+      nx /= len; ny /= len;
+      const fx = Math.cos(this.angle);
+      const fy = Math.sin(this.angle);
+      const rx = Math.sin(this.angle);
+      const ry = -Math.cos(this.angle);
+      const ax = ny * fx + nx * rx;
+      const ay = ny * fy + nx * ry;
+      this.vx += ax * speed * 10 * dt;
+      this.vy += ay * speed * 10 * dt;
     }
-    this.vx += ax * speed * 10 * dt;
-    this.vy += ay * speed * 10 * dt;
     this.vx *= 0.85;
     this.vy *= 0.85;
     this.x += this.vx * dt;

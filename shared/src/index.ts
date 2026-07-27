@@ -338,6 +338,23 @@ export interface Rect {
   w: number;
   h: number;
   height?: number;
+  color?: number;
+}
+
+function hslToHex(h: number, s: number, l: number): number {
+  // h in [0,360), s/l in [0,1]
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const to255 = (v: number) => Math.round((v + m) * 255);
+  return (to255(r) << 16) | (to255(g) << 8) | to255(b);
 }
 
 export interface City {
@@ -377,7 +394,8 @@ export function generateCity(seed: string, worldSize = WORLD_SIZE): City {
         const x = cx + margin + rng() * (blockSize - bw - margin * 2);
         const y = cy + margin + rng() * (blockSize - bh - margin * 2);
         const height = 60 + rng() * 200;
-        buildings.push({ x, y, w: bw, h: bh, height });
+        const color = hslToHex(200 + rng() * 60, 0.25 + rng() * 0.1, 0.35 + rng() * 0.25);
+        buildings.push({ x, y, w: bw, h: bh, height, color });
       }
     }
   }

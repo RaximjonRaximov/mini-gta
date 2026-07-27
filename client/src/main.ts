@@ -125,14 +125,14 @@ window.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.cli
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (camera) camera.aspect = window.innerWidth / window.innerHeight;
-  if (camera) camera.updateProjectionMatrix();
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
 }
 
 // --- Three.js scene ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0f19);
-scene.fog = new THREE.Fog(0x0b0f19, 1200, 5000);
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 1500, 6000);
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 20000);
 camera.position.set(0, 300, -300);
@@ -144,23 +144,25 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 window.addEventListener('resize', resize);
 resize();
 
-const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+const ambient = new THREE.AmbientLight(0xffffff, 0.55);
 scene.add(ambient);
-const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
 sun.position.set(2000, 2500, 1000);
+scene.add(sun.target);
 sun.castShadow = true;
 sun.shadow.mapSize.width = 2048;
 sun.shadow.mapSize.height = 2048;
-sun.shadow.camera.left = -600;
-sun.shadow.camera.right = 600;
-sun.shadow.camera.top = 600;
-sun.shadow.camera.bottom = -600;
-sun.shadow.camera.far = 4000;
+sun.shadow.camera.left = -500;
+sun.shadow.camera.right = 500;
+sun.shadow.camera.top = 500;
+sun.shadow.camera.bottom = -500;
+sun.shadow.camera.far = 5000;
 scene.add(sun);
 
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+const aimTarget = new THREE.Vector3();
 
 let cityGroup: THREE.Group | null = null;
 
@@ -171,7 +173,7 @@ function buildCity(city: City): void {
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(city.worldSize, city.worldSize),
-    new THREE.MeshLambertMaterial({ color: 0x0f172a }),
+    new THREE.MeshLambertMaterial({ color: 0x14261f }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(half, 0, half);
@@ -192,90 +194,166 @@ function buildCity(city: City): void {
   roads.instanceMatrix.needsUpdate = true;
   cityGroup.add(roads);
 
-  const buildingMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+  const buildingMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const buildings = new THREE.InstancedMesh(boxGeo, buildingMat, city.buildings.length);
   buildings.castShadow = true;
   buildings.receiveShadow = true;
   for (let i = 0; i < city.buildings.length; i++) {
     const b = city.buildings[i];
     const h = b.height ?? 60;
+    const c = b.color ?? 0x475569;
     matrix.makeTranslation(b.x + b.w / 2, h / 2, b.y + b.h / 2).scale(new THREE.Vector3(b.w, h, b.h));
     buildings.setMatrixAt(i, matrix);
+    buildings.setColorAt(i, new THREE.Color(c));
   }
   buildings.instanceMatrix.needsUpdate = true;
+  if (buildings.instanceColor) buildings.instanceColor.needsUpdate = true;
   cityGroup.add(buildings);
 
   scene.add(cityGroup);
 }
 
+// --- procedural character models ---
 const sharedGeometries = {
-  capsule: new THREE.CapsuleGeometry(7, 20, 4, 8),
-  smallCapsule: new THREE.CapsuleGeometry(5, 12, 4, 8),
-  policeCapsule: new THREE.CapsuleGeometry(7, 22, 4, 8),
-  sphere: new THREE.SphereGeometry(4, 8, 8),
-  vehicle: new THREE.BoxGeometry(36, 14, 20),
-  wheel: new THREE.CylinderGeometry(3, 3, 2, 12),
-  cone: new THREE.ConeGeometry(6, 14, 8),
+  wheel: new THREE.CylinderGeometry(3, 3, 2, 14),
+  beak: new THREE.ConeGeometry(1, 2, 8),
 };
 sharedGeometries.wheel.rotateZ(Math.PI / 2);
 
-function createPlayerMesh(color: number): THREE.Group {
+function createHumanoidMesh(skinColor: number, shirtColor: number, pantsColor: number, isPolice = false): THREE.Group {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(sharedGeometries.capsule, new THREE.MeshLambertMaterial({ color }));
-  body.position.y = 17;
-  body.receiveShadow = true;
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 18), new THREE.MeshLambertMaterial({ color: 0x111827 }));
-  barrel.position.set(0, 18, 10);
-  g.add(body, barrel);
+  const skin = new THREE.MeshLambertMaterial({ color: skinColor });
+  const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
+  const pants = new THREE.MeshLambertMaterial({ color: pantsColor });
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(10, 14, 6), shirt);
+  torso.position.y = 18;
+  torso.castShadow = false;
+  g.add(torso);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(4.5, 14, 14), skin);
+  head.position.y = 28;
+  g.add(head);
+
+  const makeLimb = (w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Group => {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, y, z);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.y = -h / 2;
+    mesh.castShadow = false;
+    pivot.add(mesh);
+    return pivot;
+  };
+
+  const leftLeg = makeLimb(3.5, 12, 4, pants, -2.5, 12, 0);
+  const rightLeg = makeLimb(3.5, 12, 4, pants, 2.5, 12, 0);
+  const leftArm = makeLimb(3, 12, 3, shirt, -6, 24, 0);
+  const rightArm = makeLimb(3, 12, 3, shirt, 6, 24, 0);
+
+  // weapon / barrel in right hand
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 16), new THREE.MeshLambertMaterial({ color: 0x111827 }));
+  barrel.position.set(0, -10, 8);
+  rightArm.children[0].add(barrel);
+
+  g.add(leftLeg, rightLeg, leftArm, rightArm);
+
+  if (isPolice) {
+    const hat = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 3, 14), new THREE.MeshLambertMaterial({ color: 0x1f2937 }));
+    hat.position.y = 33;
+    g.add(hat);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 8), new THREE.MeshLambertMaterial({ color: 0xef4444 }));
+    cone.position.y = 36;
+    g.add(cone);
+  }
+
+  g.userData = { isHumanoid: true, baseY: 0, walkPhase: 0, leftLeg, rightLeg, leftArm, rightArm, head, torso };
   return g;
 }
 
 function createVehicleMesh(color: number): THREE.Group {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(sharedGeometries.vehicle, new THREE.MeshLambertMaterial({ color }));
+  const bodyMat = new THREE.MeshLambertMaterial({ color });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(38, 12, 20), bodyMat);
   body.name = 'body';
   body.position.y = 10;
-  body.receiveShadow = true;
+  body.castShadow = false;
   g.add(body);
+
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 18), new THREE.MeshLambertMaterial({ color: 0x87ceeb, transparent: true, opacity: 0.45, depthWrite: false }));
+  cabin.position.set(0, 20, -2);
+  g.add(cabin);
+
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111827 });
+  const wheels: THREE.Mesh[] = [];
   const positions = [[-12, 3, -8], [12, 3, -8], [-12, 3, 8], [12, 3, 8]];
   for (const [wx, wy, wz] of positions) {
     const w = new THREE.Mesh(sharedGeometries.wheel, wheelMat);
     w.position.set(wx, wy, wz);
-    w.receiveShadow = true;
+    w.castShadow = false;
     g.add(w);
+    wheels.push(w);
   }
+  g.userData = { isVehicle: true, baseY: 0, wheels };
   return g;
 }
 
-function createNpcMesh(type: number): THREE.Group {
+function createChickenMesh(): THREE.Group {
   const g = new THREE.Group();
-  if (type === 0) {
-    const body = new THREE.Mesh(sharedGeometries.sphere, new THREE.MeshLambertMaterial({ color: 0xfacc15 }));
-    body.position.y = 4;
-    body.receiveShadow = true;
-    g.add(body);
-  } else if (type === 1) {
-    const body = new THREE.Mesh(sharedGeometries.smallCapsule, new THREE.MeshLambertMaterial({ color: 0x3b82f6 }));
-    body.position.y = 11;
-    body.receiveShadow = true;
-    g.add(body);
-  } else {
-    const body = new THREE.Mesh(sharedGeometries.policeCapsule, new THREE.MeshLambertMaterial({ color: 0x1f2937 }));
-    body.position.y = 18;
-    body.receiveShadow = true;
-    const cone = new THREE.Mesh(sharedGeometries.cone, new THREE.MeshLambertMaterial({ color: 0xef4444 }));
-    cone.position.y = 34;
-    g.add(body, cone);
-  }
+  const yellow = new THREE.MeshLambertMaterial({ color: 0xfacc15 });
+  const orange = new THREE.MeshLambertMaterial({ color: 0xf97316 });
+
+  const body = new THREE.Mesh(new THREE.SphereGeometry(5, 12, 12), yellow);
+  body.position.y = 7;
+  g.add(body);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(2.5, 10, 10), yellow);
+  head.position.set(0, 11, 3);
+  g.add(head);
+
+  const beak = new THREE.Mesh(sharedGeometries.beak, orange);
+  beak.rotation.x = Math.PI / 2;
+  beak.position.set(0, 11, 5);
+  g.add(beak);
+
+  const legGeo = new THREE.CylinderGeometry(0.6, 0.6, 4, 8);
+  const lLeg = new THREE.Mesh(legGeo, orange); lLeg.position.set(-1.5, 2, 0);
+  const rLeg = new THREE.Mesh(legGeo, orange); rLeg.position.set(1.5, 2, 0);
+  g.add(lLeg, rLeg);
+
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(0.8, 3, 4), yellow);
+  wing.position.set(3.5, 7, 0);
+  g.add(wing);
+  const wing2 = wing.clone(); wing2.position.set(-3.5, 7, 0);
+  g.add(wing2);
+
+  g.userData = { isChicken: true, baseY: 0 };
   return g;
 }
 
-const localPlayerMesh = createPlayerMesh(0x22c55e);
+const localPlayerMesh = createHumanoidMesh(0xf5d0a9, 0x22c55e, 0x1e293b);
 const localVehicleMesh = createVehicleMesh(0xef4444);
 localPlayerMesh.visible = false;
 localVehicleMesh.visible = false;
 scene.add(localPlayerMesh, localVehicleMesh);
+
+function animateHumanoid(mesh: THREE.Group, speed: number, dt: number): void {
+  const u = mesh.userData as { baseY: number; walkPhase: number; leftLeg: THREE.Group; rightLeg: THREE.Group; leftArm: THREE.Group; rightArm: THREE.Group };
+  if (speed > 5) u.walkPhase += speed * dt * 0.04;
+  else u.walkPhase *= 0.85;
+  const swing = Math.sin(u.walkPhase) * 0.55;
+  u.leftLeg.rotation.x = swing;
+  u.rightLeg.rotation.x = -swing;
+  u.leftArm.rotation.x = -swing * 0.7;
+  u.rightArm.rotation.x = swing * 0.7;
+  const bob = Math.abs(Math.sin(u.walkPhase * 2)) * 1.2 * Math.min(speed / 200, 1);
+  mesh.position.y = u.baseY + bob;
+}
+
+function animateVehicle(mesh: THREE.Group, speed: number, dt: number): void {
+  const wheels = mesh.userData.wheels as THREE.Mesh[];
+  const angular = (speed * dt) / 3;
+  for (const w of wheels) w.rotation.x += angular;
+}
 
 // --- netcode state ---
 let ws: WebSocket | null = null;
@@ -288,6 +366,8 @@ interface RemoteEntity {
   id: number;
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   angle: number;
   hp: number;
   color: number;
@@ -340,9 +420,8 @@ function currentAimAngle(): number {
   mouse.x = (mouseX / window.innerWidth) * 2 - 1;
   mouse.y = -(mouseY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  const target = new THREE.Vector3();
-  if (!raycaster.ray.intersectPlane(groundPlane, target)) return localState.angle;
-  return Math.atan2(target.z - localState.y, target.x - localState.x);
+  if (!raycaster.ray.intersectPlane(groundPlane, aimTarget)) return localState.angle;
+  return Math.atan2(aimTarget.z - localState.y, aimTarget.x - localState.x);
 }
 
 function buildInputPacket(): ArrayBuffer {
@@ -385,18 +464,24 @@ function applyLocalInput(dt: number, keys: number, angle: number): void {
     return;
   }
   const speed = (keys & InputKey.Sprint) ? 450 : 250;
-  let ax = 0, ay = 0;
-  if (keys & InputKey.Up) ay -= 1;
-  if (keys & InputKey.Down) ay += 1;
-  if (keys & InputKey.Left) ax -= 1;
-  if (keys & InputKey.Right) ax += 1;
-  if (ax !== 0 || ay !== 0) {
-    const len = Math.hypot(ax, ay);
-    ax /= len; ay /= len;
-    localState.angle = angle;
+  let nx = 0, ny = 0;
+  if (keys & InputKey.Up) ny += 1;
+  if (keys & InputKey.Down) ny -= 1;
+  if (keys & InputKey.Left) nx -= 1;
+  if (keys & InputKey.Right) nx += 1;
+  localState.angle = angle;
+  if (nx !== 0 || ny !== 0) {
+    const len = Math.hypot(nx, ny);
+    nx /= len; ny /= len;
+    const fx = Math.cos(localState.angle);
+    const fy = Math.sin(localState.angle);
+    const rx = Math.sin(localState.angle);
+    const ry = -Math.cos(localState.angle);
+    const ax = ny * fx + nx * rx;
+    const ay = ny * fy + nx * ry;
+    localState.vx += ax * speed * 10 * dt;
+    localState.vy += ay * speed * 10 * dt;
   }
-  localState.vx += ax * speed * 10 * dt;
-  localState.vy += ay * speed * 10 * dt;
   localState.vx *= 0.85;
   localState.vy *= 0.85;
   localState.x += localState.vx * dt;
@@ -457,10 +542,12 @@ function onSnapshot(buf: ArrayBuffer): void {
       ex.prevX = ex.x; ex.prevY = ex.y; ex.prevTime = ex.lastUpdated;
       ex.x = e.x ?? ex.x; ex.y = e.y ?? ex.y; ex.angle = e.angle ?? ex.angle;
       ex.hp = e.hp ?? ex.hp; ex.color = e.color ?? ex.color;
+      ex.vx = e.vx ?? ex.vx; ex.vy = e.vy ?? ex.vy;
       ex.lastUpdated = now;
     } else {
       entities.set(e.id, {
         id: e.id, x: e.x ?? 0, y: e.y ?? 0, angle: e.angle ?? 0,
+        vx: e.vx ?? 0, vy: e.vy ?? 0,
         hp: e.hp ?? 100, color: e.color ?? 0x22c55e,
         lastUpdated: now, prevX: e.x ?? 0, prevY: e.y ?? 0, prevTime: now,
       });
@@ -516,7 +603,7 @@ function connect(wsUrl: string, name: string, roomId: string): void {
         } else if (sub === 0x02) {
           localVehicleId = decodeVehicleEvent(ev.data);
           const body = localVehicleMesh.getObjectByName('body') as THREE.Mesh | undefined;
-          if (body && body.material) (body.material as THREE.MeshStandardMaterial).color.setHex(vehicleColor(localVehicleId % 5));
+          if (body && body.material) (body.material as THREE.MeshLambertMaterial).color.setHex(vehicleColor(localVehicleId % 5));
           localVehicleMesh.visible = localVehicleId !== 0;
           localPlayerMesh.visible = localVehicleId === 0;
         } else if (sub === 0x03) {
@@ -599,42 +686,46 @@ async function loadRooms() {
 }
 
 // --- 3D scene updates ---
-function entityYOffset(color: number): number {
-  if (color >= 200) return 11;
-  if (color >= 100) return 10;
-  return 17;
-}
-
 function ensureEntityMesh(e: RemoteEntity): void {
   if (e.mesh) return;
   if (e.color >= 200) {
-    e.mesh = createNpcMesh(e.color - 200);
+    const type = e.color - 200;
+    if (type === 0) e.mesh = createChickenMesh();
+    else if (type === 1) e.mesh = createHumanoidMesh(0xf5d0a9, 0x3b82f6, 0x1e293b);
+    else e.mesh = createHumanoidMesh(0xf5d0a9, 0x1f2937, 0x111827, true);
   } else if (e.color >= 100) {
     e.mesh = createVehicleMesh(vehicleColor(e.color - 100));
   } else {
-    e.mesh = createPlayerMesh(playerColor(e.color));
+    e.mesh = createHumanoidMesh(0xf5d0a9, playerColor(e.color), 0x1e293b);
   }
   e.mesh.visible = true;
   scene.add(e.mesh);
 }
 
-function updateEntityMesh(e: RemoteEntity, now: number, interpMs = 100): void {
+function updateEntityMesh(e: RemoteEntity, now: number, dt: number): void {
+  if (e.id === localPlayerId || e.id === localVehicleId) return;
   ensureEntityMesh(e);
-  const t = Math.min(1, Math.max(0, (now - e.lastUpdated + interpMs) / interpMs));
+  const t = Math.min(1, Math.max(0, (now - e.lastUpdated + 100) / 100));
   const x = e.prevX + (e.x - e.prevX) * t;
   const z = e.prevY + (e.y - e.prevY) * t;
-  e.mesh!.position.set(x, entityYOffset(e.color), z);
-  e.mesh!.rotation.y = -e.angle + Math.PI / 2;
-  if (e.id === localVehicleId || e.id === localPlayerId) e.mesh!.visible = false;
+  const mesh = e.mesh as THREE.Group;
+  mesh.position.x = x;
+  mesh.position.z = z;
+  mesh.rotation.y = -e.angle + Math.PI / 2;
+  const speed = Math.hypot(e.vx, e.vy);
+  if (mesh.userData.isHumanoid) animateHumanoid(mesh, speed, dt);
+  else if (mesh.userData.isVehicle) animateVehicle(mesh, speed, dt);
 }
 
-function updateLocalMesh(): void {
+function updateLocalMesh(dt: number): void {
   if (localVehicleId) {
-    localVehicleMesh.position.set(localState.x, 10, localState.y);
+    localVehicleMesh.position.set(localState.x, 0, localState.y);
     localVehicleMesh.rotation.y = -localState.angle + Math.PI / 2;
+    animateVehicle(localVehicleMesh, Math.hypot(localState.vx, localState.vy), dt);
   } else {
-    localPlayerMesh.position.set(localState.x, 17, localState.y);
+    localPlayerMesh.position.set(localState.x, 0, localState.y);
     localPlayerMesh.rotation.y = -localState.angle + Math.PI / 2;
+    animateHumanoid(localPlayerMesh, Math.hypot(localState.vx, localState.vy), dt);
   }
 }
 
@@ -664,13 +755,11 @@ function loop(): void {
 
   if (ws && ws.readyState === WebSocket.OPEN) {
     const packet = buildInputPacket();
-    const { seq, keys: k, angle } = (() => {
-      const v = new DataView(packet);
-      const seq = v.getUint16(0, true);
-      const keys = v.getUint8(2);
-      const a = v.getUint16(4, true);
-      return { seq, keys, angle: a / 65535 * Math.PI * 2 };
-    })();
+    const v = new DataView(packet);
+    const seq = v.getUint16(0, true);
+    const k = v.getUint8(2);
+    const a = v.getUint16(4, true);
+    const angle = a / 65535 * Math.PI * 2;
     applyLocalInput(dt, k, angle);
     pendingInputs.push({ seq, keys: k, angle, x: localState.x, y: localState.y, vx: localState.vx, vy: localState.vy });
     if (pendingInputs.length > 30) pendingInputs.shift();
@@ -685,8 +774,8 @@ function loop(): void {
     }
   }
 
-  updateLocalMesh();
-  for (const e of entities.values()) updateEntityMesh(e, now);
+  updateLocalMesh(dt);
+  for (const e of entities.values()) updateEntityMesh(e, now, dt);
   if (localState.hp > 0) updateCamera();
 
   renderer.render(scene, camera);
