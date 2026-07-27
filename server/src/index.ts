@@ -63,14 +63,17 @@ app.post('/api/rooms', (res, req) => {
 
 app.post('/api/rooms/:id/join', (res, req) => {
   const id = req.getParameter(0) || '';
+  const forwardedHost = req.getHeader('x-forwarded-host');
+  const reqHost = req.getHeader('host');
+  const forwardedProto = req.getHeader('x-forwarded-proto');
   readBody(res, req, (body) => {
     try {
       const room = rooms.get(id);
       if (!room) { json(res, 404, { error: 'not found' }); return; }
       const data = JSON.parse(body) as JoinRoomRequest;
       if (!room.checkPassword(data.password)) { json(res, 403, { error: 'wrong password' }); return; }
-      const proto = req.getHeader('x-forwarded-proto') === 'https' ? 'wss' : 'ws';
-      const host = req.getHeader('host') || `${HOST}:${PORT}`;
+      const host = forwardedHost || reqHost || `${HOST}:${PORT}`;
+      const proto = forwardedProto === 'https' || forwardedProto === 'wss' || forwardedHost ? 'wss' : 'ws';
       json(res, 200, { roomId: id, wsUrl: `${proto}://${host}/ws?roomId=${id}` });
     } catch (e) {
       json(res, 400, { error: 'bad request' });
